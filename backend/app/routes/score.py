@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from ..db import Enrichment, ICP, Lead, Score, get_session
 from ..models import ScoreResult
@@ -36,11 +36,24 @@ async def _score_one(lead_dict: dict, enrich_dict: dict, icp: dict, use_llm: boo
 
 
 @router.post("", response_model=ScoreResult)
-async def run_score() -> ScoreResult:
+async def run_score(
+    only_unscored: bool = Query(
+        False,
+        description="When true, score only leads that don't yet have a row in the scores table.",
+    ),
+) -> ScoreResult:
     use_llm = gemini.is_enabled()
 
     with get_session() as s:
-        leads = s.query(Lead).all()
+        if only_unscored:
+            scored_ids = {row[0] for row in s.query(Score.lead_id).all()}
+            leads = [l for l in s.query(Lead).all() if l.id not in scored_ids]
+        else:
+            leads = s.query(Lead).all()
+
+        if not leads:
+            return ScoreResult(scored=0, cached=0, failed=0)
+
         icp_row = s.get(ICP, 1)
         icp = {
             "industry_keywords": icp_row.industry_keywords,

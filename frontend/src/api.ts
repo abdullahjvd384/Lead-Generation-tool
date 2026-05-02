@@ -45,7 +45,11 @@ export const api = {
       body: JSON.stringify(icp),
     }),
 
-  runScore: () => jsonFetch<ScoreResult>("/score", { method: "POST" }),
+  runScore: (opts?: { onlyUnscored?: boolean }) =>
+    jsonFetch<ScoreResult>(
+      `/score${opts?.onlyUnscored ? "?only_unscored=true" : ""}`,
+      { method: "POST" }
+    ),
   generateEmail: (leadId: number) =>
     jsonFetch<Email>(`/outreach/${leadId}`, { method: "POST" }),
 };

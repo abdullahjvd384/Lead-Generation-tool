@@ -49,13 +49,14 @@ export default function App() {
     setIcp(updated);
   }
 
-  async function handleScore() {
+  async function handleScore(onlyUnscored = false) {
     setScoring(true);
     setScoreMsg(null);
     try {
-      const r = await api.runScore();
+      const r = await api.runScore({ onlyUnscored });
+      const verb = onlyUnscored ? "Scored" : "Re-scored";
       setScoreMsg(
-        `Scored ${r.scored} leads from live sites, ${r.cached} without site data, ${r.failed} unreachable.`
+        `${verb} ${r.scored} leads from live sites, ${r.cached} without site data, ${r.failed} unreachable.`
       );
       await Promise.all([reloadLeads(), refreshAiStatus()]);
     } finally {
@@ -64,6 +65,7 @@ export default function App() {
   }
 
   const scoredCount = leads.filter((l) => l.score !== null).length;
+  const unscoredCount = leads.length - scoredCount;
 
   return (
     <div className="min-h-screen">
@@ -167,14 +169,34 @@ export default function App() {
               </p>
             )}
           </div>
-          <button
-            onClick={handleScore}
-            disabled={scoring || leads.length === 0}
-            className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 text-white px-4 py-2 text-sm font-medium hover:bg-indigo-500 disabled:opacity-50"
-          >
-            <Zap size={14} />
-            {scoring ? "Scoring…" : "Score all leads"}
-          </button>
+          <div className="flex flex-col items-end gap-2">
+            {unscoredCount > 0 && scoredCount > 0 && (
+              <button
+                onClick={() => handleScore(true)}
+                disabled={scoring}
+                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 text-white px-4 py-2 text-sm font-medium hover:bg-indigo-500 disabled:opacity-50"
+              >
+                <Zap size={14} />
+                {scoring ? "Scoring…" : `Score ${unscoredCount} new lead${unscoredCount === 1 ? "" : "s"}`}
+              </button>
+            )}
+            <button
+              onClick={() => handleScore(false)}
+              disabled={scoring || leads.length === 0}
+              className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50 ${
+                unscoredCount > 0 && scoredCount > 0
+                  ? "border border-slate-200 text-slate-700 hover:bg-slate-50"
+                  : "bg-indigo-600 text-white hover:bg-indigo-500"
+              }`}
+            >
+              <Zap size={14} />
+              {scoring
+                ? "Scoring…"
+                : scoredCount === leads.length && leads.length > 0
+                ? "Re-score all leads"
+                : "Score all leads"}
+            </button>
+          </div>
         </div>
 
         {leads.length === 0 ? (
