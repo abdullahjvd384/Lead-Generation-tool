@@ -194,10 +194,10 @@ async def run_score(
 
 
 @router.post("/start")
-def start_score_background(only_unscored: bool = Query(False)) -> dict:
+async def start_score_background(only_unscored: bool = Query(False)) -> dict:
     """Start scoring in the background and return immediately (202 accepted)."""
     try:
-        # Schedule the scoring coroutine; let the event loop run it independently.
+        # Schedule the scoring coroutine on the running event loop.
         asyncio.create_task(_do_score(only_unscored))
         return {"status": "accepted", "message": "Scoring started in background"}
     except Exception as exc:
