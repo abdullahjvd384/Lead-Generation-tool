@@ -85,8 +85,14 @@ def extract_signals(html: str, soup: BeautifulSoup) -> dict[str, Any]:
     text = soup.get_text(" ", strip=True).lower() if soup else ""
 
     hiring = bool(HIRING_RE.search(text)) if text else False
-    founded_match = FOUNDED_RE.search(text) if text else None
-    founded_year = int(founded_match.group(3)) if founded_match else None
+    founded_year = None
+    if text:
+        founded_match = FOUNDED_RE.search(text)
+        if founded_match:
+            try:
+                founded_year = int(founded_match.group(3))
+            except (ValueError, IndexError):
+                founded_year = None
 
     return {
         "hiring": hiring,
