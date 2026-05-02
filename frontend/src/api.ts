@@ -1,5 +1,6 @@
 import type {
   Email,
+  CsvPreview,
   ICP,
   Lead,
   LookalikeList,
@@ -8,7 +9,9 @@ import type {
   PipelineStageUpdate,
   PipelineSummary,
   RankedLeadList,
+  ScoreHistoryItem,
   ScoreResult,
+  ScoringConfig,
   UploadResult,
 } from "./types";
 
@@ -52,6 +55,8 @@ export const api = {
     }),
   leadStageHistory: (leadId: number) =>
     jsonFetch<PipelineStageHistoryItem[]>(`/leads/${leadId}/stage/history`),
+  leadScoreHistory: (leadId: number) =>
+    jsonFetch<ScoreHistoryItem[]>(`/leads/${leadId}/score/history`),
   lookalikes: (leadId: number, limit = 10) =>
     jsonFetch<LookalikeList>(`/leads/${leadId}/lookalikes?limit=${limit}`),
   resetLeads: () =>
@@ -65,6 +70,22 @@ export const api = {
     if (!r.ok) throw new Error(await r.text());
     return r.json();
   },
+  previewCsv: async (file: File, mapping?: Record<string, string>): Promise<CsvPreview> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    if (mapping) fd.append("mapping_json", JSON.stringify(mapping));
+    const r = await fetch(BASE + "/leads/upload/preview", { method: "POST", body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  },
+  confirmCsv: async (file: File, mapping?: Record<string, string>): Promise<UploadResult> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    if (mapping) fd.append("mapping_json", JSON.stringify(mapping));
+    const r = await fetch(BASE + "/leads/upload/confirm", { method: "POST", body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  },
   exportUrl: (tier?: string) =>
     BASE + "/leads/export/csv" + (tier ? `?tier=${tier}` : ""),
 
@@ -75,12 +96,20 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(icp),
     }),
+  getScoringConfig: () => jsonFetch<ScoringConfig>("/icp/scoring"),
+  putScoringConfig: (payload: Pick<ScoringConfig, "template" | "weights">) =>
+    jsonFetch<ScoringConfig>("/icp/scoring", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
 
   runScore: (opts?: { onlyUnscored?: boolean }) =>
     jsonFetch<ScoreResult>(
       `/score${opts?.onlyUnscored ? "?only_unscored=true" : ""}`,
       { method: "POST" }
     ),
-  generateEmail: (leadId: number) =>
-    jsonFetch<Email>(`/outreach/${leadId}`, { method: "POST" }),
+  generateEmail: (leadId: number, tone: Email["tone"] = "direct") =>
+    jsonFetch<Email>(`/outreach/${leadId}?tone=${tone}`, { method: "POST" }),
+  outreachDrafts: (leadId: number) => jsonFetch<Email[]>(`/outreach/${leadId}/drafts`),
 };

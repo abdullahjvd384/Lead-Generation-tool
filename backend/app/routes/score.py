@@ -6,9 +6,9 @@ from datetime import datetime
 import httpx
 from fastapi import APIRouter, Query
 
-from ..db import Enrichment, ICP, Lead, Score, get_session
+from ..db import Enrichment, ICP, Lead, Score, ScoreHistory, ScoringConfig, get_session
 from ..models import ScoreResult
-from ..services import enricher, gemini, scorer, scorer_llm
+from ..services import enricher, openai_client, scorer, scorer_llm
 from ..services.scraper import USER_AGENT, fetch_homepage
 
 router = APIRouter(prefix="/score", tags=["score"])
@@ -28,7 +28,7 @@ async def _enrich_one(s, client, lead: Lead) -> tuple[str, dict]:
 async def _score_one(lead_dict: dict, enrich_dict: dict, icp: dict, use_llm: bool) -> dict:
     """Score one lead, falling back to rule-based on any LLM failure."""
     if use_llm:
-        # The Gemini SDK is sync; run it in a thread so we can gather() many at once.
+        # The OpenAI SDK is sync; run it in a thread so we can gather() many at once.
         result = await asyncio.to_thread(scorer_llm.score_lead_llm, lead_dict, enrich_dict, icp)
         if result is not None:
             return result
@@ -42,7 +42,7 @@ async def run_score(
         description="When true, score only leads that don't yet have a row in the scores table.",
     ),
 ) -> ScoreResult:
-    use_llm = gemini.is_enabled()
+    use_llm = openai_client.is_enabled()
 
     with get_session() as s:
         if only_unscored:
@@ -55,11 +55,13 @@ async def run_score(
             return ScoreResult(scored=0, cached=0, failed=0)
 
         icp_row = s.get(ICP, 1)
+        config = s.get(ScoringConfig, 1)
         icp = {
             "industry_keywords": icp_row.industry_keywords,
             "size_min": icp_row.size_min,
             "size_max": icp_row.size_max,
             "value_prop": icp_row.value_prop,
+            "weights": (config.weights if config else {}) or {},
         }
 
         # Phase 1 — scrape + enrich all leads in parallel.
@@ -72,7 +74,7 @@ async def run_score(
                 *[_enrich_one(s, client, lead) for lead in leads]
             )
 
-        # Phase 2 — score all leads in parallel (Gemini calls run in threads).
+        # Phase 2 — score all leads in parallel (OpenAI calls run in threads).
         score_inputs = []
         for lead, (_status, enrich_dict) in zip(leads, enrich_results):
             score_inputs.append(
@@ -118,13 +120,50 @@ async def run_score(
                 )
 
             existing_score = s.get(Score, lead.id)
+            next_version = (
+                s.query(ScoreHistory)
+                .filter(ScoreHistory.lead_id == lead.id)
+                .count()
+                + 1
+            )
             if existing_score:
+                changed = (
+                    round(float(existing_score.score or 0), 1)
+                    != round(float(scored_dict["score"] or 0), 1)
+                    or (existing_score.tier or "") != (scored_dict["tier"] or "")
+                    or (existing_score.why or "") != (scored_dict["why"] or "")
+                )
+                if changed:
+                    s.add(
+                        ScoreHistory(
+                            lead_id=lead.id,
+                            previous_score=existing_score.score,
+                            previous_tier=existing_score.tier or "",
+                            new_score=scored_dict["score"],
+                            new_tier=scored_dict["tier"],
+                            previous_why=existing_score.why or "",
+                            new_why=scored_dict["why"],
+                            version=next_version,
+                        )
+                    )
                 existing_score.score = scored_dict["score"]
                 existing_score.tier = scored_dict["tier"]
                 existing_score.reasons = scored_dict["reasons"]
                 existing_score.why = scored_dict["why"]
                 existing_score.scored_at = datetime.utcnow()
             else:
+                s.add(
+                    ScoreHistory(
+                        lead_id=lead.id,
+                        previous_score=None,
+                        previous_tier="",
+                        new_score=scored_dict["score"],
+                        new_tier=scored_dict["tier"],
+                        previous_why="",
+                        new_why=scored_dict["why"],
+                        version=next_version,
+                    )
+                )
                 s.add(
                     Score(
                         lead_id=lead.id,

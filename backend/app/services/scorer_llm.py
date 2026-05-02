@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from typing import Any, Optional
 
-from . import gemini
+from . import openai_client
 
 # Same signal names as the rule-based scorer so the drawer's progress bars
 # render identically. Weights are passed in the prompt as the rubric, not
@@ -28,6 +28,7 @@ VALID_TIERS = {"A", "B", "C"}
 
 
 def _build_prompt(lead: dict, enrichment: dict, icp: dict) -> str:
+    weights = _normalized_weights(icp.get("weights") or SIGNAL_WEIGHTS)
     return f"""You are a B2B sales analyst scoring how well a company fits an Ideal Customer Profile.
 
 ICP (the user's target customer):
@@ -49,11 +50,11 @@ Scraped homepage signals:
 - Activity signals: {json.dumps(enrichment.get("signals") or {}, default=str)}
 
 Score this lead on a 0-100 scale across exactly these 5 signals (with these caps):
-- industry_match (max 30): does the company's actual business semantically match the ICP keywords? Consider synonyms (e.g. "software-as-a-service" = "saas").
-- size_band (max 20): how well does the employee count fit the target band?
-- tech_relevance (max 20): do they use modern growth-tooling (HubSpot, Salesforce, Marketo, Intercom, Drift, Segment, Mixpanel, Amplitude, Pardot)?
-- contact_completeness (max 15): emails, phones, LinkedIn presence?
-- activity_recency (max 15): hiring page? recent founding year (younger = higher)?
+- industry_match (max {weights["industry_match"]}): does the company's actual business semantically match the ICP keywords? Consider synonyms (e.g. "software-as-a-service" = "saas").
+- size_band (max {weights["size_band"]}): how well does the employee count fit the target band?
+- tech_relevance (max {weights["tech_relevance"]}): do they use modern growth-tooling (HubSpot, Salesforce, Marketo, Intercom, Drift, Segment, Mixpanel, Amplitude, Pardot)?
+- contact_completeness (max {weights["contact_completeness"]}): emails, phones, LinkedIn presence?
+- activity_recency (max {weights["activity_recency"]}): hiring page? recent founding year (younger = higher)?
 
 Be conservative — reserve scores of 80+ for leads with strong matches across multiple signals.
 Tier: A if total >= 75, B if 50-74, C otherwise.
@@ -63,11 +64,11 @@ Return JSON exactly in this shape:
   "score": <number 0-100, sum of contributions>,
   "tier": "A" | "B" | "C",
   "reasons": [
-    {{"signal": "industry_match", "weight": 30, "raw": <0.0-1.0>, "contribution": <0-30>, "details": ["specific facts"]}},
-    {{"signal": "size_band", "weight": 20, "raw": <0.0-1.0>, "contribution": <0-20>, "details": []}},
-    {{"signal": "tech_relevance", "weight": 20, "raw": <0.0-1.0>, "contribution": <0-20>, "details": ["HubSpot", "Segment"]}},
-    {{"signal": "contact_completeness", "weight": 15, "raw": <0.0-1.0>, "contribution": <0-15>, "details": ["email", "LinkedIn"]}},
-    {{"signal": "activity_recency", "weight": 15, "raw": <0.0-1.0>, "contribution": <0-15>, "details": ["public hiring page"]}}
+    {{"signal": "industry_match", "weight": {weights["industry_match"]}, "raw": <0.0-1.0>, "contribution": <0-{weights["industry_match"]}>, "details": ["specific facts"]}},
+    {{"signal": "size_band", "weight": {weights["size_band"]}, "raw": <0.0-1.0>, "contribution": <0-{weights["size_band"]}>, "details": []}},
+    {{"signal": "tech_relevance", "weight": {weights["tech_relevance"]}, "raw": <0.0-1.0>, "contribution": <0-{weights["tech_relevance"]}>, "details": ["HubSpot", "Segment"]}},
+    {{"signal": "contact_completeness", "weight": {weights["contact_completeness"]}, "raw": <0.0-1.0>, "contribution": <0-{weights["contact_completeness"]}>, "details": ["email", "LinkedIn"]}},
+    {{"signal": "activity_recency", "weight": {weights["activity_recency"]}, "raw": <0.0-1.0>, "contribution": <0-{weights["activity_recency"]}>, "details": ["public hiring page"]}}
   ],
   "why": "<one human sentence starting with the company name, naming the strongest 2-3 reasons>"
 }}
@@ -76,10 +77,24 @@ Include ALL FIVE signals every time, even if contribution is 0. The "details" ar
 """
 
 
-def _validate_and_normalize(raw: Any) -> Optional[dict]:
-    """Defensive parsing — Gemini may return slightly malformed shapes."""
+def _normalized_weights(raw_weights: dict) -> dict[str, float]:
+    weights: dict[str, float] = {}
+    for signal, default in SIGNAL_WEIGHTS.items():
+        try:
+            weights[signal] = max(0.0, float(raw_weights.get(signal, default)))
+        except (TypeError, ValueError, AttributeError):
+            weights[signal] = float(default)
+    total = sum(weights.values())
+    if total <= 0:
+        return {signal: float(weight) for signal, weight in SIGNAL_WEIGHTS.items()}
+    return {signal: round((weight / total) * 100, 1) for signal, weight in weights.items()}
+
+
+def _validate_and_normalize(raw: Any, weights: dict[str, float] | None = None) -> Optional[dict]:
+    """Defensive parsing — OpenAI may return slightly malformed shapes."""
     if not isinstance(raw, dict):
         return None
+    weights = weights or {signal: float(weight) for signal, weight in SIGNAL_WEIGHTS.items()}
     try:
         score = float(raw.get("score", 0))
         tier = str(raw.get("tier", "C")).strip().upper()
@@ -102,7 +117,7 @@ def _validate_and_normalize(raw: Any) -> Optional[dict]:
             reasons.append(
                 {
                     "signal": signal,
-                    "weight": SIGNAL_WEIGHTS[signal],
+                    "weight": weights[signal],
                     "raw": round(float(r.get("raw", 0) or 0), 2),
                     "contribution": round(
                         float(r.get("contribution", 0) or 0), 1
@@ -111,12 +126,12 @@ def _validate_and_normalize(raw: Any) -> Optional[dict]:
                 }
             )
 
-        # Backfill any signals Gemini omitted, with zero contribution.
+        # Backfill any signals OpenAI omitted, with zero contribution.
         for sig in VALID_SIGNALS - seen_signals:
             reasons.append(
                 {
                     "signal": sig,
-                    "weight": SIGNAL_WEIGHTS[sig],
+                        "weight": weights[sig],
                     "raw": 0.0,
                     "contribution": 0.0,
                     "details": [],
@@ -130,7 +145,7 @@ def _validate_and_normalize(raw: Any) -> Optional[dict]:
 
         why = str(raw.get("why") or "").strip()
         if not why:
-            why = "Scored by Gemini — see signal breakdown for details."
+            why = "Scored by OpenAI — see signal breakdown for details."
 
         return {
             "score": round(score, 1),
@@ -144,8 +159,9 @@ def _validate_and_normalize(raw: Any) -> Optional[dict]:
 
 def score_lead_llm(lead: dict, enrichment: dict, icp: dict) -> Optional[dict]:
     """Returns the same dict shape as `scorer.score_lead`, or None on failure."""
-    if not gemini.is_enabled():
+    if not openai_client.is_enabled():
         return None
+    weights = _normalized_weights(icp.get("weights") or SIGNAL_WEIGHTS)
     prompt = _build_prompt(lead, enrichment, icp)
-    raw = gemini.generate_json(prompt, temperature=0.2)
-    return _validate_and_normalize(raw)
+    raw = openai_client.generate_json(prompt, temperature=0.2)
+    return _validate_and_normalize(raw, weights)

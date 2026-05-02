@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import os
 from typing import Optional
 
 import pandas as pd
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
 from ..db import (
@@ -16,9 +17,11 @@ from ..db import (
     LeadPipeline,
     LeadPipelineHistory,
     Score,
+    ScoreHistory,
     get_session,
 )
 from ..models import (
+    CsvPreviewOut,
     LeadOut,
     LookalikeListOut,
     LookalikeMatchOut,
@@ -30,6 +33,7 @@ from ..models import (
     PipelineSummaryOut,
     RankedLeadListOut,
     RankedLeadOut,
+    ScoreHistoryOut,
     UploadResult,
 )
 from ..services import csv_mapper
@@ -51,6 +55,12 @@ def _hydrate(s, leads: list[Lead]) -> list[LeadOut]:
         e = s.get(Enrichment, lead.id)
         sc = s.get(Score, lead.id)
         pipeline = s.get(LeadPipeline, lead.id)
+        latest_score_change = (
+            s.query(ScoreHistory)
+            .filter(ScoreHistory.lead_id == lead.id)
+            .order_by(ScoreHistory.changed_at.desc(), ScoreHistory.id.desc())
+            .first()
+        )
         lead_dict = {
             "company_name": lead.company_name or "",
             "website": lead.website or "",
@@ -96,6 +106,18 @@ def _hydrate(s, leads: list[Lead]) -> list[LeadOut]:
                 stage_reason=(pipeline.reason if pipeline else ""),
                 stage_updated_by=(pipeline.updated_by if pipeline else None),
                 stage_updated_at=(pipeline.updated_at if pipeline else None),
+                latest_score_change=(
+                    {
+                        "previous_score": latest_score_change.previous_score,
+                        "previous_tier": latest_score_change.previous_tier,
+                        "new_score": latest_score_change.new_score,
+                        "new_tier": latest_score_change.new_tier,
+                        "version": latest_score_change.version,
+                        "changed_at": latest_score_change.changed_at,
+                    }
+                    if latest_score_change
+                    else None
+                ),
             )
         )
     return out
@@ -210,6 +232,32 @@ def lead_stage_history(lead_id: int) -> list[PipelineHistoryOut]:
     ]
 
 
+@router.get("/{lead_id}/score/history", response_model=list[ScoreHistoryOut])
+def lead_score_history(lead_id: int) -> list[ScoreHistoryOut]:
+    with get_session() as s:
+        rows = (
+            s.query(ScoreHistory)
+            .filter(ScoreHistory.lead_id == lead_id)
+            .order_by(ScoreHistory.changed_at.desc(), ScoreHistory.id.desc())
+            .all()
+        )
+    return [
+        ScoreHistoryOut(
+            id=row.id,
+            lead_id=row.lead_id,
+            previous_score=row.previous_score,
+            previous_tier=row.previous_tier or "",
+            new_score=row.new_score,
+            new_tier=row.new_tier,
+            previous_why=row.previous_why or "",
+            new_why=row.new_why or "",
+            version=row.version,
+            changed_at=row.changed_at,
+        )
+        for row in rows
+    ]
+
+
 @router.get("/{lead_id}/lookalikes", response_model=LookalikeListOut)
 def lead_lookalikes(lead_id: int, limit: int = Query(10, ge=1, le=50)) -> LookalikeListOut:
     with get_session() as s:
@@ -304,13 +352,165 @@ def _ingest_records(
     )
 
 
+def _parse_csv(raw: bytes) -> pd.DataFrame:
+    try:
+        return pd.read_csv(io.BytesIO(raw))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"could not parse CSV: {exc}")
+
+
+def _parse_mapping(mapping_json: str | None) -> dict[str, str]:
+    if not mapping_json:
+        return {}
+    try:
+        parsed = json.loads(mapping_json)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"invalid mapping JSON: {exc}")
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=400, detail="mapping JSON must be an object")
+    return {str(k): str(v) for k, v in parsed.items()}
+
+
+def _apply_user_mapping(df: pd.DataFrame, mapping: dict[str, str]) -> tuple[pd.DataFrame, dict[str, str]]:
+    valid_targets = set(csv_mapper.CANONICAL) | {"skip"}
+    rename: dict[str, str] = {}
+    drop: list[str] = []
+    seen_targets: set[str] = set()
+    used: dict[str, str] = {}
+
+    for original, target in mapping.items():
+        if original not in df.columns or target not in valid_targets:
+            continue
+        if target == "skip":
+            drop.append(original)
+            used[original] = "skip"
+            continue
+        if target in seen_targets:
+            continue
+        seen_targets.add(target)
+        rename[original] = target
+        used[original] = target
+
+    if drop:
+        df = df.drop(columns=[col for col in drop if col in df.columns])
+    if rename:
+        df = df.rename(columns=rename)
+    return df, used
+
+
+def _normalize_csv_df(
+    df: pd.DataFrame,
+    mapping_json: str | None = None,
+) -> tuple[pd.DataFrame, dict[str, str], str, list[str]]:
+    original_columns = [str(c) for c in df.columns]
+    mapping = _parse_mapping(mapping_json)
+    if mapping:
+        df, used = _apply_user_mapping(df, mapping)
+        if "company_name" not in df.columns:
+            raise HTTPException(
+                status_code=400,
+                detail="Your mapping must include one company_name column.",
+            )
+        return df, used, "manual", original_columns
+
+    df, mapping_used, source = csv_mapper.normalize_columns(df)
+    return df, mapping_used, source, original_columns
+
+
+def _preview_df(
+    df: pd.DataFrame,
+    *,
+    mapping_used: dict[str, str],
+    mapping_source: str,
+    original_columns: list[str],
+) -> CsvPreviewOut:
+    inserted = duplicates = invalid = 0
+    invalid_rows: list[int] = []
+    seen_keys: set[str] = set()
+
+    with get_session() as s:
+        existing_domains = {row[0] for row in s.query(Lead.domain).all() if row[0]}
+        existing_names = {
+            (row[0] or "").strip().lower()
+            for row in s.query(Lead.company_name).filter(Lead.domain == "").all()
+        }
+
+    for index, rec in enumerate(df.to_dict(orient="records"), start=2):
+        name = (rec.get("company_name") or "").strip()
+        if not name:
+            invalid += 1
+            invalid_rows.append(index)
+            continue
+        website = (rec.get("website") or "").strip()
+        domain = normalize_domain(website) if website else ""
+        key = domain or name.lower()
+        if key in seen_keys or (domain and domain in existing_domains) or (not domain and name.lower() in existing_names):
+            duplicates += 1
+            continue
+        seen_keys.add(key)
+        inserted += 1
+
+    preview_rows = []
+    for rec in df.head(5).to_dict(orient="records"):
+        preview_rows.append({field: rec.get(field, "") for field in csv_mapper.CANONICAL})
+
+    return CsvPreviewOut(
+        total_rows=len(df.index),
+        inserted=inserted,
+        duplicates=duplicates,
+        invalid=invalid,
+        mapping_used=mapping_used,
+        mapping_source=mapping_source,
+        columns=original_columns,
+        canonical_columns=[c for c in csv_mapper.CANONICAL if c in df.columns],
+        preview_rows=preview_rows,
+        invalid_rows=invalid_rows[:20],
+    )
+
+
+@router.post("/upload/preview", response_model=CsvPreviewOut)
+async def preview_csv(
+    file: UploadFile = File(...),
+    mapping_json: str | None = Form(default=None),
+) -> CsvPreviewOut:
+    raw = await file.read()
+    df = _parse_csv(raw)
+    df, mapping_used, source, original_columns = _normalize_csv_df(df, mapping_json)
+    if "company_name" not in df.columns:
+        cols = ", ".join(str(c) for c in df.columns)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not find a company-name column in the CSV. Found columns: [{cols}].",
+        )
+    return _preview_df(
+        df,
+        mapping_used=mapping_used,
+        mapping_source=source,
+        original_columns=original_columns,
+    )
+
+
+@router.post("/upload/confirm", response_model=UploadResult)
+async def confirm_csv_upload(
+    file: UploadFile = File(...),
+    mapping_json: str | None = Form(default=None),
+) -> UploadResult:
+    raw = await file.read()
+    df = _parse_csv(raw)
+    df, mapping_used, source, _original_columns = _normalize_csv_df(df, mapping_json)
+    if "company_name" not in df.columns:
+        raise HTTPException(status_code=400, detail="Could not find a company-name column in the CSV.")
+    return _ingest_records(
+        df.to_dict(orient="records"),
+        mapping_used=mapping_used,
+        mapping_source=source,
+    )
+
+
 @router.post("/upload", response_model=UploadResult)
 async def upload_csv(file: UploadFile = File(...)) -> UploadResult:
     raw = await file.read()
-    try:
-        df = pd.read_csv(io.BytesIO(raw))
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"could not parse CSV: {exc}")
+    df = _parse_csv(raw)
 
     df, mapping_used, source = csv_mapper.normalize_columns(df)
 

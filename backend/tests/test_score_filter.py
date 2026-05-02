@@ -14,17 +14,17 @@ def client(monkeypatch):
     tmpdir = tempfile.mkdtemp()
     db_path = os.path.join(tmpdir, "leadgen_test.db")
     monkeypatch.setenv("LEADGEN_DB", db_path)
-    # Force rule-based path so tests don't depend on a Gemini key.
-    monkeypatch.setenv("GEMINI_API_KEY", "")
+    # Force rule-based path so tests don't depend on an OpenAI key.
+    monkeypatch.setenv("OPENAI_API_KEY", "")
 
     # Re-import everything fresh under the patched env.
     import importlib
 
     from app import db as db_module
-    from app.services import gemini as gemini_module
+    from app.services import openai_client as openai_module
 
     importlib.reload(db_module)
-    importlib.reload(gemini_module)
+    importlib.reload(openai_module)
 
     from app import main as main_module
     importlib.reload(main_module)

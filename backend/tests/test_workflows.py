@@ -12,15 +12,15 @@ def client(monkeypatch):
     tmpdir = tempfile.mkdtemp()
     db_path = os.path.join(tmpdir, "leadgen_test.db")
     monkeypatch.setenv("LEADGEN_DB", db_path)
-    monkeypatch.setenv("GEMINI_API_KEY", "")
+    monkeypatch.setenv("OPENAI_API_KEY", "")
 
     import importlib
 
     from app import db as db_module
-    from app.services import gemini as gemini_module
+    from app.services import openai_client as openai_module
 
     importlib.reload(db_module)
-    importlib.reload(gemini_module)
+    importlib.reload(openai_module)
 
     from app import main as main_module
 

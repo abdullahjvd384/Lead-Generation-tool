@@ -2,17 +2,17 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from ..services import gemini
+from ..services import openai_client
 
 router = APIRouter(prefix="/system", tags=["system"])
 
 
 @router.get("/status")
 def status() -> dict:
-    enabled = gemini.is_enabled()
+    enabled = openai_client.is_enabled()
     return {
         "ai_enabled": enabled,
-        "has_key": gemini.has_key(),
-        "circuit_open": gemini.circuit_open(),
-        "model": gemini.DEFAULT_MODEL if enabled else None,
+        "has_key": openai_client.has_key(),
+        "circuit_open": openai_client.circuit_open(),
+        "model": openai_client.DEFAULT_MODEL if enabled else None,
     }

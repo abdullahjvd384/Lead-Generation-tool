@@ -42,6 +42,14 @@ export interface Lead {
   stage_reason: string;
   stage_updated_by: string | null;
   stage_updated_at: string | null;
+  latest_score_change: {
+    previous_score: number | null;
+    previous_tier: string;
+    new_score: number;
+    new_tier: string;
+    version: number;
+    changed_at: string;
+  } | null;
 }
 
 export interface RankedLead extends Lead {
@@ -78,6 +86,19 @@ export interface PipelineStageHistoryItem {
   reason: string;
   updated_by: string;
   updated_at: string;
+}
+
+export interface ScoreHistoryItem {
+  id: number;
+  lead_id: number;
+  previous_score: number | null;
+  previous_tier: string;
+  new_score: number;
+  new_tier: string;
+  previous_why: string;
+  new_why: string;
+  version: number;
+  changed_at: string;
 }
 
 export interface PipelineSummaryItem {
@@ -120,9 +141,20 @@ export interface ICP {
   updated_at: string;
 }
 
+export interface ScoringConfig {
+  id: number;
+  template: string;
+  weights: Record<string, number>;
+  version: number;
+  updated_at: string;
+}
+
 export interface Email {
+  id?: number | null;
+  tone: "direct" | "warm" | "executive";
   subject: string;
   body: string;
+  created_at?: string | null;
 }
 
 export interface UploadResult {
@@ -131,7 +163,20 @@ export interface UploadResult {
   invalid: number;
   total_leads: number;
   mapping_used: Record<string, string>;
-  mapping_source: "exact" | "alias" | "openai" | "none";
+  mapping_source: "exact" | "alias" | "openai" | "manual" | "none";
+}
+
+export interface CsvPreview {
+  total_rows: number;
+  inserted: number;
+  duplicates: number;
+  invalid: number;
+  mapping_used: Record<string, string>;
+  mapping_source: "exact" | "alias" | "openai" | "manual" | "none";
+  columns: string[];
+  canonical_columns: string[];
+  preview_rows: Record<string, string | number>[];
+  invalid_rows: number[];
 }
 
 export interface ScoreResult {

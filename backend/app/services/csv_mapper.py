@@ -17,7 +17,7 @@ from typing import Any
 
 import pandas as pd
 
-from . import gemini
+from . import openai_client
 
 CANONICAL = ["company_name", "website", "industry", "employee_count", "location"]
 
@@ -70,7 +70,7 @@ def apply_alias_mapping(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, str]]
         normalized = _normalize_header(original)
         canonical = _ALIAS_TO_CANONICAL.get(normalized)
         if canonical is None:
-            # Leave unrecognized columns alone — Gemini may handle them later.
+            # Leave unrecognized columns alone — OpenAI may handle them later.
             continue
         if canonical in seen_targets:
             # Two columns mapped to the same canonical name — keep the first.
@@ -118,7 +118,7 @@ doesn't match any. Return JSON exactly like:
 Include EVERY column from the input. Only use the canonical field names listed
 above (or "skip"). Each canonical field should appear at most once.
 """
-    result = gemini.generate_json(prompt, temperature=0.0)
+    result = openai_client.generate_json(prompt, temperature=0.0)
     if not isinstance(result, dict):
         return {}
 
@@ -153,7 +153,7 @@ def normalize_columns(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, str], s
         return df, alias_mapping, source
 
     # Pass 2 — only runs if alias dict couldn't find company_name.
-    if not gemini.is_enabled():
+    if not openai_client.is_enabled():
         return df, alias_mapping, "none"
 
     sample_rows: list[dict[str, Any]] = df.head(3).to_dict(orient="records")

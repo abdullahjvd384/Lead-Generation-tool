@@ -52,6 +52,7 @@ class LeadOut(BaseModel):
     stage_reason: str = ""
     stage_updated_by: Optional[str] = None
     stage_updated_at: Optional[datetime] = None
+    latest_score_change: Optional[dict[str, Any]] = None
 
 
 class RankedLeadOut(LeadOut):
@@ -100,6 +101,30 @@ class PipelineSummaryOut(BaseModel):
     items: list[PipelineSummaryItem]
 
 
+class ScoreHistoryOut(BaseModel):
+    id: int
+    lead_id: int
+    previous_score: Optional[float] = None
+    previous_tier: str = ""
+    new_score: float
+    new_tier: str
+    previous_why: str = ""
+    new_why: str = ""
+    version: int
+    changed_at: datetime
+
+
+class ScoringConfigIn(BaseModel):
+    template: str = "Balanced"
+    weights: dict[str, float] = Field(default_factory=dict)
+
+
+class ScoringConfigOut(ScoringConfigIn):
+    id: int
+    version: int
+    updated_at: datetime
+
+
 class LookalikeReasonOut(BaseModel):
     signal: str
     weight: float
@@ -127,7 +152,20 @@ class UploadResult(BaseModel):
     invalid: int
     total_leads: int
     mapping_used: dict[str, str] = Field(default_factory=dict)
-    mapping_source: str = "exact"  # exact | alias | gemini | none
+    mapping_source: str = "exact"  # exact | alias | openai | manual | none
+
+
+class CsvPreviewOut(BaseModel):
+    total_rows: int
+    inserted: int
+    duplicates: int
+    invalid: int
+    mapping_used: dict[str, str] = Field(default_factory=dict)
+    mapping_source: str = "exact"
+    columns: list[str] = Field(default_factory=list)
+    canonical_columns: list[str] = Field(default_factory=list)
+    preview_rows: list[dict[str, Any]] = Field(default_factory=list)
+    invalid_rows: list[int] = Field(default_factory=list)
 
 
 class ScoreResult(BaseModel):
@@ -137,5 +175,8 @@ class ScoreResult(BaseModel):
 
 
 class OutreachOut(BaseModel):
+    id: Optional[int] = None
+    tone: str = "direct"
     subject: str
     body: str
+    created_at: Optional[datetime] = None

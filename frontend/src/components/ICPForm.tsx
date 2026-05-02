@@ -54,21 +54,21 @@ export function ICPForm({ icp, onSave }: Props) {
 
         <label className="block text-sm">
           <span className="text-slate-600 font-medium">Target size band</span>
-          <div className="mt-1 flex items-center gap-2">
+          <div className="mt-1 flex flex-wrap items-center gap-2">
             <input
               type="number"
               value={sizeMin}
               onChange={(e) => setSizeMin(Number(e.target.value))}
-              className="w-24 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400"
+              className="flex-1 min-w-[80px] rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400"
             />
-            <span className="text-slate-400 text-xs">to</span>
+            <span className="text-slate-400 text-xs whitespace-nowrap">to</span>
             <input
               type="number"
               value={sizeMax}
               onChange={(e) => setSizeMax(Number(e.target.value))}
-              className="w-24 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400"
+              className="flex-1 min-w-[80px] rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400"
             />
-            <span className="text-xs text-slate-500">employees</span>
+            <span className="text-xs text-slate-500 whitespace-nowrap">employees</span>
           </div>
         </label>
 

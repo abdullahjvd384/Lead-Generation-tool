@@ -71,6 +71,20 @@ class Score(Base):
     scored_at = Column(DateTime, default=datetime.utcnow)
 
 
+class ScoreHistory(Base):
+    __tablename__ = "score_history"
+    id = Column(Integer, primary_key=True)
+    lead_id = Column(Integer, ForeignKey("leads.id"), index=True)
+    previous_score = Column(Float, nullable=True)
+    previous_tier = Column(String, default="")
+    new_score = Column(Float, default=0.0)
+    new_tier = Column(String, default="C")
+    previous_why = Column(Text, default="")
+    new_why = Column(Text, default="")
+    version = Column(Integer, default=1)
+    changed_at = Column(DateTime, default=datetime.utcnow)
+
+
 class ScrapeCache(Base):
     __tablename__ = "scrape_cache"
     domain = Column(String, primary_key=True)
@@ -99,6 +113,34 @@ class LeadPipelineHistory(Base):
     updated_at = Column(DateTime, default=datetime.utcnow)
 
 
+class OutreachDraft(Base):
+    __tablename__ = "outreach_drafts"
+    id = Column(Integer, primary_key=True)
+    lead_id = Column(Integer, ForeignKey("leads.id"), index=True)
+    tone = Column(String, default="direct")
+    subject = Column(String, default="")
+    body = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ScoringConfig(Base):
+    __tablename__ = "scoring_config"
+    id = Column(Integer, primary_key=True)
+    template = Column(String, default="Balanced")
+    weights = Column(JSON, default=dict)
+    version = Column(Integer, default=1)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+DEFAULT_SCORING_WEIGHTS = {
+    "industry_match": 30,
+    "size_band": 20,
+    "tech_relevance": 20,
+    "contact_completeness": 15,
+    "activity_recency": 15,
+}
+
+
 def init_db() -> None:
     Base.metadata.create_all(engine)
     # Seed singleton ICP row if missing.
@@ -111,6 +153,16 @@ def init_db() -> None:
                     size_min=10,
                     size_max=500,
                     value_prop="AI-powered lead enrichment for B2B sales teams",
+                )
+            )
+            s.commit()
+        if s.get(ScoringConfig, 1) is None:
+            s.add(
+                ScoringConfig(
+                    id=1,
+                    template="Balanced",
+                    weights=DEFAULT_SCORING_WEIGHTS.copy(),
+                    version=1,
                 )
             )
             s.commit()

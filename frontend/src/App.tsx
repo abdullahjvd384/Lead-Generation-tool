@@ -7,6 +7,9 @@ import { UploadPanel } from "./components/UploadPanel";
 import { LeadTable } from "./components/LeadTable";
 import { LeadDrawer } from "./components/LeadDrawer";
 import { QualitySummary } from "./components/QualitySummary";
+import { ActionQueue } from "./components/ActionQueue";
+import { PipelineBoard } from "./components/PipelineBoard";
+import { ScoringConfigPanel } from "./components/ScoringConfigPanel";
 
 export default function App() {
   const [icp, setIcp] = useState<ICP | null>(null);
@@ -136,11 +139,12 @@ export default function App() {
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-6 space-y-5">
-        <div className="grid gap-5 md:grid-cols-2">
+        <div className="grid gap-5 lg:grid-cols-3">
           {icp && <ICPForm icp={icp} onSave={handleSaveIcp} />}
           <UploadPanel
-            onUpload={async (f) => {
-              const r = await api.uploadCsv(f);
+            onPreview={(file, mapping) => api.previewCsv(file, mapping)}
+            onConfirm={async (file, mapping) => {
+              const r = await api.confirmCsv(file, mapping);
               await reloadLeads();
               return r;
             }}
@@ -156,6 +160,7 @@ export default function App() {
             }}
             totalLeads={leads.length}
           />
+          <ScoringConfigPanel onSaved={reloadLeads} />
         </div>
 
         <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex items-center justify-between">
@@ -209,6 +214,22 @@ export default function App() {
         </div>
 
         <QualitySummary leads={leads} />
+
+        <ActionQueue leads={leads} onSelect={setSelected} />
+
+        <PipelineBoard
+          leads={leads}
+          selectedId={selected?.id ?? null}
+          onSelect={setSelected}
+          onStageChange={async (lead, stage) => {
+            await api.updateLeadStage(lead.id, {
+              stage,
+              reason: `Moved from ${lead.stage}`,
+              updated_by: "user",
+            });
+            await reloadLeads();
+          }}
+        />
 
         <div className="grid gap-5 lg:grid-cols-[1.35fr_0.9fr]">
           <section className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">

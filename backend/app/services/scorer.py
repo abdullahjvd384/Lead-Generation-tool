@@ -132,12 +132,14 @@ def score_lead(lead: dict, enrichment: dict, icp: dict) -> dict[str, Any]:
     contact_raw, contact_found = _contact_completeness_score(enrichment.get("contacts") or {})
     activity_raw, activity_notes = _activity_recency_score(enrichment.get("signals") or {})
 
+    weights = _normalized_weights(icp.get("weights") or WEIGHTS)
+
     contributions = [
-        ("industry_match", ind_raw, WEIGHTS["industry_match"], ind_hits),
-        ("size_band", size_raw, WEIGHTS["size_band"], []),
-        ("tech_relevance", tech_raw, WEIGHTS["tech_relevance"], tech_hits),
-        ("contact_completeness", contact_raw, WEIGHTS["contact_completeness"], contact_found),
-        ("activity_recency", activity_raw, WEIGHTS["activity_recency"], activity_notes),
+        ("industry_match", ind_raw, weights["industry_match"], ind_hits),
+        ("size_band", size_raw, weights["size_band"], []),
+        ("tech_relevance", tech_raw, weights["tech_relevance"], tech_hits),
+        ("contact_completeness", contact_raw, weights["contact_completeness"], contact_found),
+        ("activity_recency", activity_raw, weights["activity_recency"], activity_notes),
     ]
 
     reasons = [
@@ -155,6 +157,19 @@ def score_lead(lead: dict, enrichment: dict, icp: dict) -> dict[str, Any]:
     tier = next(t for thresh, t in TIER_THRESHOLDS if score >= thresh)
     why = build_why(reasons, lead, enrichment)
     return {"score": score, "tier": tier, "reasons": reasons, "why": why}
+
+
+def _normalized_weights(raw_weights: dict[str, Any]) -> dict[str, float]:
+    weights: dict[str, float] = {}
+    for signal, default in WEIGHTS.items():
+        try:
+            weights[signal] = max(0.0, float(raw_weights.get(signal, default)))
+        except (TypeError, ValueError, AttributeError):
+            weights[signal] = float(default)
+    total = sum(weights.values())
+    if total <= 0:
+        return {signal: float(weight) for signal, weight in WEIGHTS.items()}
+    return {signal: round((weight / total) * 100, 4) for signal, weight in weights.items()}
 
 
 def build_why(reasons: list[dict], lead: dict, enrichment: dict) -> str:

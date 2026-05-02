@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from . import gemini
+from . import openai_client
 
 
 def _build_prompt(lead: dict, enrichment: dict, score: dict, icp: dict) -> str:
@@ -17,6 +17,7 @@ def _build_prompt(lead: dict, enrichment: dict, score: dict, icp: dict) -> str:
     signals = enrichment.get("signals") or {}
     why = score.get("why") or "(no scoring rationale available)"
     value_prop = icp.get("value_prop") or "(unspecified)"
+    tone = icp.get("tone") or "direct"
 
     facts: list[str] = []
     if industry and industry != "(not stated)":
@@ -41,6 +42,7 @@ What we know about them:
 Why they're a good fit for us: {why}
 
 What we sell: {value_prop}
+Tone: {tone}
 
 Return JSON exactly in this shape:
 {{
@@ -51,6 +53,7 @@ Return JSON exactly in this shape:
 Rules:
 - Never use phrases like "hope you're well", "I came across your company", "as a leader in".
 - Don't start with "I" — start with something about THEM.
+- If tone is "executive", sound boardroom concise. If "warm", sound conversational. If "direct", be crisp and practical.
 - Body must be under 80 words.
 - Don't make up facts not given above.
 """
@@ -59,10 +62,10 @@ Rules:
 def generate_email_llm(
     lead: dict, enrichment: dict, score: dict, icp: dict
 ) -> Optional[dict]:
-    if not gemini.is_enabled():
+    if not openai_client.is_enabled():
         return None
     prompt = _build_prompt(lead, enrichment, score, icp)
-    raw = gemini.generate_json(prompt, temperature=0.7)
+    raw = openai_client.generate_json(prompt, temperature=0.7)
     if not isinstance(raw, dict):
         return None
 
