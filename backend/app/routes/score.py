@@ -36,17 +36,11 @@ async def _score_one(lead_dict: dict, enrich_dict: dict, icp: dict, use_llm: boo
     return scorer.score_lead(lead_dict, enrich_dict, icp)
 
 
-@router.post("", response_model=ScoreResult)
-async def run_score(
-    only_unscored: bool = Query(
-        False,
-        description="When true, score only leads that don't yet have a row in the scores table.",
-    ),
-) -> ScoreResult:
-    try:
-        use_llm = openai_client.is_enabled()
+async def _do_score(only_unscored: bool) -> ScoreResult:
+    """Internal scoring coroutine usable from background tasks."""
+    use_llm = openai_client.is_enabled()
 
-        with get_session() as s:
+    with get_session() as s:
         if only_unscored:
             scored_ids = {row[0] for row in s.query(Score.lead_id).all()}
             leads = [l for l in s.query(Lead).all() if l.id not in scored_ids]
@@ -66,7 +60,6 @@ async def run_score(
             "weights": (config.weights if config else {}) or {},
         }
 
-        # Phase 1 — scrape + enrich all leads in parallel.
         async with httpx.AsyncClient(
             timeout=5.0,
             headers={"User-Agent": USER_AGENT},
@@ -76,7 +69,6 @@ async def run_score(
                 *[_enrich_one(s, client, lead) for lead in leads]
             )
 
-        # Phase 2 — score all leads in parallel (OpenAI calls run in threads).
         score_inputs = []
         for lead, (_status, enrich_dict) in zip(leads, enrich_results):
             score_inputs.append(
@@ -94,7 +86,6 @@ async def run_score(
             *[_score_one(ld, ed, icp, use_llm) for ld, ed in score_inputs]
         )
 
-        # Phase 3 — write everything to SQLite in one transaction.
         scored = cached = failed = 0
         for lead, (status, enrich_dict), scored_dict in zip(
             leads, enrich_results, score_results
@@ -185,7 +176,30 @@ async def run_score(
 
         s.commit()
         return ScoreResult(scored=scored, cached=cached, failed=failed)
+
+
+
+@router.post("", response_model=ScoreResult)
+async def run_score(
+    only_unscored: bool = Query(
+        False,
+        description="When true, score only leads that don't yet have a row in the scores table.",
+    ),
+) -> ScoreResult:
+    try:
+        return await _do_score(only_unscored)
     except Exception as exc:
         logging.exception("Error running scoring")
-        # Return the exception message to help debugging in staging; remove in production.
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/start")
+def start_score_background(only_unscored: bool = Query(False)) -> dict:
+    """Start scoring in the background and return immediately (202 accepted)."""
+    try:
+        # Schedule the scoring coroutine; let the event loop run it independently.
+        asyncio.create_task(_do_score(only_unscored))
+        return {"status": "accepted", "message": "Scoring started in background"}
+    except Exception as exc:
+        logging.exception("Failed to start background scoring")
         raise HTTPException(status_code=500, detail=str(exc))

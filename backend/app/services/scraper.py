@@ -12,7 +12,7 @@ from ..db import ScrapeCache
 
 USER_AGENT = "LeadQualifier/0.1 (+contact: leadqualifier@example.com)"
 TIMEOUT_S = 5.0
-MAX_CONCURRENCY = 5
+MAX_CONCURRENCY = 2
 PER_DOMAIN_GAP_S = 1.0
 CACHE_TTL = timedelta(days=7)
 
