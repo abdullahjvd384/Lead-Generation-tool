@@ -132,6 +132,15 @@ class ScoringConfig(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class ScoringJob(Base):
+    __tablename__ = "scoring_jobs"
+    id = Column(Integer, primary_key=True)
+    started_at = Column(DateTime, default=datetime.utcnow)
+    finished_at = Column(DateTime, nullable=True)
+    status = Column(String, default="running")
+    detail = Column(Text, default="")
+
+
 DEFAULT_SCORING_WEIGHTS = {
     "industry_match": 30,
     "size_band": 20,
