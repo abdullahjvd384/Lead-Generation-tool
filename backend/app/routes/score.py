@@ -4,7 +4,8 @@ import asyncio
 from datetime import datetime
 
 import httpx
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, HTTPException
+import logging
 
 from ..db import Enrichment, ICP, Lead, Score, ScoreHistory, ScoringConfig, get_session
 from ..models import ScoreResult
@@ -42,9 +43,10 @@ async def run_score(
         description="When true, score only leads that don't yet have a row in the scores table.",
     ),
 ) -> ScoreResult:
-    use_llm = openai_client.is_enabled()
+    try:
+        use_llm = openai_client.is_enabled()
 
-    with get_session() as s:
+        with get_session() as s:
         if only_unscored:
             scored_ids = {row[0] for row in s.query(Score.lead_id).all()}
             leads = [l for l in s.query(Lead).all() if l.id not in scored_ids]
@@ -182,4 +184,8 @@ async def run_score(
                 failed += 1
 
         s.commit()
-    return ScoreResult(scored=scored, cached=cached, failed=failed)
+        return ScoreResult(scored=scored, cached=cached, failed=failed)
+    except Exception as exc:
+        logging.exception("Error running scoring")
+        # Return the exception message to help debugging in staging; remove in production.
+        raise HTTPException(status_code=500, detail=str(exc))
