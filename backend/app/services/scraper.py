@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta
 from typing import Optional
+from urllib.parse import urlparse
 
 import httpx
 from sqlalchemy.orm import Session
@@ -17,6 +18,24 @@ CACHE_TTL = timedelta(days=7)
 
 _semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
 _domain_locks: dict[str, asyncio.Lock] = {}
+
+
+def _candidate_urls(domain: str) -> list[str]:
+    host = (domain or "").strip().lower()
+    if not host:
+        return []
+    if "://" in host:
+        parsed = urlparse(host)
+        host = (parsed.hostname or "").lower()
+    host = host[4:] if host.startswith("www.") else host
+    if not host:
+        return []
+
+    variants = []
+    for prefix in ("https://", "http://"):
+        variants.append(f"{prefix}{host}/")
+        variants.append(f"{prefix}www.{host}/")
+    return list(dict.fromkeys(variants))
 
 
 def _lock_for(domain: str) -> asyncio.Lock:
@@ -61,12 +80,17 @@ async def fetch_homepage(
         # Per-domain politeness gap.
         await asyncio.sleep(PER_DOMAIN_GAP_S)
         try:
-            resp = await client.get(f"https://{domain}/")
-            html = resp.text or ""
-            headers = dict(resp.headers)
-            status = "ok" if resp.status_code < 400 else "error"
-        except Exception:
             html, headers, status = "", {}, "error"
+            for url in _candidate_urls(domain):
+                try:
+                    resp = await client.get(url)
+                    if resp.status_code < 400 and (resp.text or "").strip():
+                        html = resp.text or ""
+                        headers = dict(resp.headers)
+                        status = "ok"
+                        break
+                except Exception:
+                    continue
         finally:
             if own_client:
                 await client.aclose()
