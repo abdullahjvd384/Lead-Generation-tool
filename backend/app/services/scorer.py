@@ -123,11 +123,17 @@ def score_lead(lead: dict, enrichment: dict, icp: dict) -> dict[str, Any]:
     )
 
     ind_raw, ind_hits = _industry_match_score(lead_text, keywords)
-    size_raw = _size_band_score(
-        int(lead.get("employee_count") or 0),
-        int(icp.get("size_min") or 0),
-        int(icp.get("size_max") or 10000),
-    )
+    try:
+        employee_count = int(lead.get("employee_count") or 0)
+    except (ValueError, TypeError):
+        employee_count = 0
+    try:
+        size_min = int(icp.get("size_min") or 0)
+        size_max = int(icp.get("size_max") or 10000)
+    except (ValueError, TypeError):
+        size_min = 0
+        size_max = 10000
+    size_raw = _size_band_score(employee_count, size_min, size_max)
     tech_raw, tech_hits = _tech_relevance_score(enrichment.get("tech_stack") or [])
     contact_raw, contact_found = _contact_completeness_score(enrichment.get("contacts") or {})
     activity_raw, activity_notes = _activity_recency_score(enrichment.get("signals") or {})
