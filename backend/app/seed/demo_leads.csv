@@ -1,0 +1,51 @@
+company_name,website,industry,employee_count,location
+Notion,https://www.notion.so,SaaS productivity,800,San Francisco CA
+Linear,https://linear.app,SaaS project management,200,San Francisco CA
+Vercel,https://vercel.com,Developer tools SaaS,500,San Francisco CA
+Supabase,https://supabase.com,Developer tools SaaS,150,Singapore
+PostHog,https://posthog.com,SaaS analytics,120,London UK
+Retool,https://retool.com,SaaS internal tools,400,San Francisco CA
+Airtable,https://airtable.com,SaaS no-code,900,San Francisco CA
+Webflow,https://webflow.com,SaaS website builder,650,San Francisco CA
+Figma,https://www.figma.com,SaaS design,1500,San Francisco CA
+Canva,https://www.canva.com,SaaS design,4000,Sydney Australia
+Loom,https://www.loom.com,SaaS video,300,San Francisco CA
+Calendly,https://calendly.com,SaaS scheduling,500,Atlanta GA
+Pipedrive,https://www.pipedrive.com,SaaS CRM,1000,Tallinn Estonia
+Hotjar,https://www.hotjar.com,SaaS analytics,250,Valletta Malta
+Mailchimp,https://mailchimp.com,SaaS marketing,1200,Atlanta GA
+ConvertKit,https://convertkit.com,SaaS email marketing,150,Boise ID
+Zapier,https://zapier.com,SaaS automation,800,San Francisco CA
+Make,https://www.make.com,SaaS automation,400,Prague Czechia
+ClickUp,https://clickup.com,SaaS project management,1100,San Diego CA
+Monday.com,https://monday.com,SaaS work management,1900,Tel Aviv Israel
+Asana,https://asana.com,SaaS work management,1700,San Francisco CA
+Basecamp,https://basecamp.com,SaaS project management,80,Chicago IL
+Buffer,https://buffer.com,SaaS social media,90,Remote
+Hootsuite,https://www.hootsuite.com,SaaS social media,1000,Vancouver Canada
+Sprout Social,https://sproutsocial.com,SaaS social media,1100,Chicago IL
+Brevo,https://www.brevo.com,SaaS marketing,800,Paris France
+Klaviyo,https://www.klaviyo.com,SaaS marketing,2000,Boston MA
+ActiveCampaign,https://www.activecampaign.com,SaaS marketing,900,Chicago IL
+Drift,https://www.drift.com,SaaS conversational marketing,500,Boston MA
+Intercom,https://www.intercom.com,SaaS customer messaging,900,San Francisco CA
+Front,https://front.com,SaaS shared inbox,400,San Francisco CA
+Help Scout,https://www.helpscout.com,SaaS customer support,200,Boston MA
+Zendesk,https://www.zendesk.com,SaaS customer support,6000,San Francisco CA
+Freshworks,https://www.freshworks.com,SaaS CRM,5000,San Mateo CA
+HubSpot,https://www.hubspot.com,SaaS marketing,8000,Cambridge MA
+Salesforce,https://www.salesforce.com,SaaS CRM,75000,San Francisco CA
+Gong,https://www.gong.io,SaaS sales intelligence,1200,Palo Alto CA
+Outreach,https://www.outreach.io,SaaS sales engagement,1100,Seattle WA
+Apollo.io,https://www.apollo.io,SaaS sales intelligence,800,San Francisco CA
+ZoomInfo,https://www.zoominfo.com,SaaS sales intelligence,4000,Vancouver WA
+Snowflake,https://www.snowflake.com,Data cloud,7000,Bozeman MT
+Databricks,https://www.databricks.com,Data lakehouse,6000,San Francisco CA
+Segment,https://segment.com,SaaS CDP,500,San Francisco CA
+Mixpanel,https://mixpanel.com,SaaS analytics,400,San Francisco CA
+Amplitude,https://amplitude.com,SaaS analytics,800,San Francisco CA
+LaunchDarkly,https://launchdarkly.com,SaaS feature flags,500,Oakland CA
+Twilio,https://www.twilio.com,SaaS communications,8000,San Francisco CA
+SendGrid,https://sendgrid.com,SaaS email,1000,Denver CO
+Slack,https://slack.com,SaaS messaging,2500,San Francisco CA
+Atlassian,https://www.atlassian.com,SaaS collaboration,11000,Sydney Australia

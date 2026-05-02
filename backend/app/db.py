@@ -1,0 +1,106 @@
+from __future__ import annotations
+
+import os
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy import (
+    Column,
+    DateTime,
+    Float,
+    Integer,
+    JSON,
+    String,
+    Text,
+    create_engine,
+)
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+
+DB_PATH = os.environ.get("LEADGEN_DB", "leadgen.db")
+DATABASE_URL = f"sqlite:///{DB_PATH}"
+
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class ICP(Base):
+    __tablename__ = "icp"
+    id = Column(Integer, primary_key=True)
+    industry_keywords = Column(String, default="")
+    size_min = Column(Integer, default=0)
+    size_max = Column(Integer, default=10000)
+    value_prop = Column(Text, default="")
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Lead(Base):
+    __tablename__ = "leads"
+    id = Column(Integer, primary_key=True)
+    company_name = Column(String, nullable=False)
+    website = Column(String, default="")
+    domain = Column(String, index=True, unique=True)
+    industry = Column(String, default="")
+    employee_count = Column(Integer, default=0)
+    location = Column(String, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Enrichment(Base):
+    __tablename__ = "enrichment"
+    lead_id = Column(Integer, primary_key=True)
+    title = Column(String, default="")
+    description = Column(Text, default="")
+    tech_stack = Column(JSON, default=list)
+    contacts = Column(JSON, default=dict)
+    signals = Column(JSON, default=dict)
+    fetched_at = Column(DateTime, default=datetime.utcnow)
+    status = Column(String, default="ok")  # ok | error | skipped
+
+
+class Score(Base):
+    __tablename__ = "scores"
+    lead_id = Column(Integer, primary_key=True)
+    score = Column(Float, default=0.0)
+    tier = Column(String, default="C")
+    reasons = Column(JSON, default=list)
+    why = Column(Text, default="")
+    scored_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ScrapeCache(Base):
+    __tablename__ = "scrape_cache"
+    domain = Column(String, primary_key=True)
+    html = Column(Text, default="")
+    headers = Column(JSON, default=dict)
+    fetched_at = Column(DateTime, default=datetime.utcnow)
+
+
+def init_db() -> None:
+    Base.metadata.create_all(engine)
+    # Seed singleton ICP row if missing.
+    with SessionLocal() as s:
+        if s.get(ICP, 1) is None:
+            s.add(
+                ICP(
+                    id=1,
+                    industry_keywords="saas, software, b2b",
+                    size_min=10,
+                    size_max=500,
+                    value_prop="AI-powered lead enrichment for B2B sales teams",
+                )
+            )
+            s.commit()
+
+
+def get_session() -> Session:
+    return SessionLocal()
+
+
+def to_dict(obj: Any) -> dict:
+    if obj is None:
+        return {}
+    return {c.name: getattr(obj, c.name) for c in obj.__table__.columns}
