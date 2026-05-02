@@ -226,3 +226,24 @@ async def start_score_background(only_unscored: bool = Query(False)) -> dict:
     except Exception as exc:
         logging.exception("Failed to start background scoring")
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/jobs")
+def list_scoring_jobs(limit: int = Query(20, ge=1, le=100)) -> list[dict]:
+    """List recent scoring jobs for debugging."""
+    with get_session() as s:
+        rows = (
+            s.query(ScoringJob).order_by(ScoringJob.id.desc()).limit(limit).all()
+        )
+        out = []
+        for r in rows:
+            out.append(
+                {
+                    "id": r.id,
+                    "status": r.status,
+                    "started_at": r.started_at.isoformat() if r.started_at else None,
+                    "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+                    "detail": r.detail,
+                }
+            )
+        return out
