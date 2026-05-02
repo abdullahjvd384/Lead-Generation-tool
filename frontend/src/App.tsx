@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { Zap, Download } from "lucide-react";
 import { api } from "./api";
-import type { ICP, Lead } from "./types";
+import type { ICP, Lead, PipelineSummary, RankedLead } from "./types";
 import { ICPForm } from "./components/ICPForm";
 import { UploadPanel } from "./components/UploadPanel";
 import { LeadTable } from "./components/LeadTable";
 import { LeadDrawer } from "./components/LeadDrawer";
+import { QualitySummary } from "./components/QualitySummary";
 
 export default function App() {
   const [icp, setIcp] = useState<ICP | null>(null);
@@ -13,8 +14,10 @@ export default function App() {
   const [selected, setSelected] = useState<Lead | null>(null);
   const [scoring, setScoring] = useState(false);
   const [scoreMsg, setScoreMsg] = useState<string | null>(null);
+  const [ranked, setRanked] = useState<RankedLead[]>([]);
+  const [pipeline, setPipeline] = useState<PipelineSummary | null>(null);
   const [ai, setAi] = useState<{
-    gemini_enabled: boolean;
+    ai_enabled: boolean;
     has_key: boolean;
     circuit_open: boolean;
   } | null>(null);
@@ -22,7 +25,7 @@ export default function App() {
   async function refreshAiStatus() {
     const s = await api.systemStatus();
     setAi({
-      gemini_enabled: s.gemini_enabled,
+      ai_enabled: s.ai_enabled,
       has_key: s.has_key,
       circuit_open: s.circuit_open,
     });
@@ -35,6 +38,12 @@ export default function App() {
       const fresh = list.find((l) => l.id === selected.id);
       if (fresh) setSelected(fresh);
     }
+    const [rankedData, pipelineData] = await Promise.all([
+      api.rankedLeads({ limit: 5 }),
+      api.pipelineSummary(),
+    ]);
+    setRanked(rankedData.items);
+    setPipeline(pipelineData);
   }
 
   useEffect(() => {
@@ -84,18 +93,18 @@ export default function App() {
               </p>
             </div>
             {ai && (() => {
-              const active = ai.gemini_enabled;
+              const active = ai.ai_enabled;
               const broken = ai.has_key && ai.circuit_open;
               const label = active
-                ? "AI: Gemini"
+                ? "AI: OpenAI"
                 : broken
-                ? "AI: rule-based (Gemini unavailable)"
-                : "AI: rule-based";
+                ? "AI: rule-based (OpenAI unavailable)"
+                : "AI: rule-based"
               const tooltip = active
-                ? "Gemini-powered scoring, email writing, and CSV mapping are active"
+                ? "OpenAI-powered scoring, email writing, and CSV mapping are active"
                 : broken
-                ? "Your Gemini key is set but recent calls failed (likely quota or invalid key). The app fell back to rule-based logic for the rest of this session — restart the backend to retry."
-                : "Set GEMINI_API_KEY in backend/.env to enable AI features";
+                ? "Your OpenAI key is set but recent calls failed (likely quota or invalid key). The app fell back to rule-based logic for the rest of this session — restart the backend to retry."
+                : "Set OPENAI_API_KEY in backend/.env to enable AI features";
               const cls = active
                 ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                 : broken
@@ -199,6 +208,77 @@ export default function App() {
           </div>
         </div>
 
+        <QualitySummary leads={leads} />
+
+        <div className="grid gap-5 lg:grid-cols-[1.35fr_0.9fr]">
+          <section className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">
+                  Top prospects
+                </h2>
+                <p className="text-xs text-slate-500 mt-1">
+                  Server-ranked by score, confidence, and workflow readiness.
+                </p>
+              </div>
+              <span className="text-xs text-slate-400">
+                {ranked.length ? `Showing top ${ranked.length}` : "No ranked leads yet"}
+              </span>
+            </div>
+            <div className="mt-4 space-y-3">
+              {ranked.length === 0 ? (
+                <p className="text-sm text-slate-400">Run scoring to generate a ranked list.</p>
+              ) : (
+                ranked.map((lead) => (
+                  <button
+                    key={lead.id}
+                    onClick={() => setSelected(leads.find((item) => item.id === lead.id) ?? null)}
+                    className="w-full text-left rounded-lg border border-slate-200 px-4 py-3 hover:border-indigo-200 hover:bg-indigo-50/50 transition"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-slate-900">
+                          #{lead.rank} {lead.company_name}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          {lead.next_step} · {lead.stage}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-sm font-semibold text-slate-900">
+                          {lead.score?.toFixed(0)}/100
+                        </div>
+                        <div className="text-xs text-slate-500">{lead.quality.recommended_action}</div>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-xs text-slate-600 line-clamp-2">{lead.rank_reason}</p>
+                  </button>
+                ))
+              )}
+            </div>
+          </section>
+
+          <section className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">
+              Pipeline snapshot
+            </h2>
+            <p className="text-xs text-slate-500 mt-1">
+              Persisted CRM-style stages you can move manually from the lead drawer.
+            </p>
+            <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+              {(pipeline?.items ?? []).map((item) => (
+                <div key={item.stage} className="rounded-lg border border-slate-200 px-3 py-3">
+                  <div className="text-xs uppercase tracking-wide text-slate-500">{item.stage}</div>
+                  <div className="mt-1 text-2xl font-semibold text-slate-900">{item.count}</div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 text-xs text-slate-500">
+              Total tracked: {pipeline?.total ?? 0}
+            </div>
+          </section>
+        </div>
+
         {leads.length === 0 ? (
           <div className="bg-white rounded-xl border border-dashed border-slate-300 p-12 text-center">
             <p className="text-slate-500 text-sm">
@@ -214,7 +294,11 @@ export default function App() {
         )}
       </main>
 
-      <LeadDrawer lead={selected} onClose={() => setSelected(null)} />
+      <LeadDrawer
+        lead={selected}
+        onClose={() => setSelected(null)}
+        onUpdated={reloadLeads}
+      />
 
       <footer className="max-w-7xl mx-auto px-6 py-8 text-xs text-slate-400">
         Built for Caprae's AI-Readiness challenge. Scraping is rate-limited

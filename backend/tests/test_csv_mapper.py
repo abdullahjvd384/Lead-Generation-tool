@@ -75,7 +75,7 @@ def test_gemini_fallback_used_when_aliases_fail(monkeypatch):
         }
     )
     out, mapping, source = csv_mapper.normalize_columns(df)
-    assert source == "gemini"
+    assert source == "openai"
     assert "company_name" in out.columns
     assert "website" in out.columns
     assert mapping["nom_entreprise"] == "company_name"

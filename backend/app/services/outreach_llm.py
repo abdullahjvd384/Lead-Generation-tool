@@ -1,4 +1,4 @@
-"""Gemini-powered cold email writer.
+"""OpenAI-powered cold email writer.
 
 Returns the same {subject, body} shape as `outreach.generate_email`. On any
 failure returns None and the caller falls back to the deterministic template.

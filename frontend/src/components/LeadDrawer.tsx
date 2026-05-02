@@ -1,23 +1,43 @@
 import { useEffect, useState } from "react";
 import { Mail, X, Copy, Check, Globe, Phone, Linkedin } from "lucide-react";
-import type { Email, Lead } from "../types";
+import type { Email, Lead, LookalikeList, PipelineStage } from "../types";
 import { TierBadge } from "./TierBadge";
 import { api } from "../api";
 
 interface Props {
   lead: Lead | null;
   onClose: () => void;
+  onUpdated?: () => void | Promise<void>;
 }
 
-export function LeadDrawer({ lead, onClose }: Props) {
+const actionStyles: Record<string, string> = {
+  Prioritize: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  Research: "bg-sky-50 text-sky-700 border-sky-200",
+  Nurture: "bg-amber-50 text-amber-700 border-amber-200",
+  Disqualify: "bg-rose-50 text-rose-700 border-rose-200",
+  "Score first": "bg-slate-50 text-slate-600 border-slate-200",
+};
+
+export function LeadDrawer({ lead, onClose, onUpdated }: Props) {
   const [email, setEmail] = useState<Email | null>(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [stage, setStage] = useState<PipelineStage["stage"]>("new");
+  const [stageReason, setStageReason] = useState("");
+  const [stageBusy, setStageBusy] = useState(false);
+  const [lookalikes, setLookalikes] = useState<LookalikeList | null>(null);
+  const [lookalikeBusy, setLookalikeBusy] = useState(false);
 
   useEffect(() => {
     setEmail(null);
     setCopied(false);
+    setLookalikes(null);
   }, [lead?.id]);
+
+  useEffect(() => {
+    setStage(lead?.stage ?? "new");
+    setStageReason(lead?.stage_reason ?? "");
+  }, [lead?.stage, lead?.stage_reason]);
 
   if (!lead) return null;
 
@@ -39,8 +59,41 @@ export function LeadDrawer({ lead, onClose }: Props) {
     setTimeout(() => setCopied(false), 1500);
   }
 
+  async function saveStage() {
+    if (!lead) return;
+    setStageBusy(true);
+    try {
+      await api.updateLeadStage(lead.id, {
+        stage,
+        reason: stageReason,
+        updated_by: "user",
+      });
+      await onUpdated?.();
+    } finally {
+      setStageBusy(false);
+    }
+  }
+
+  async function findLookalikes() {
+    if (!lead) return;
+    setLookalikeBusy(true);
+    try {
+      setLookalikes(await api.lookalikes(lead.id, 5));
+    } finally {
+      setLookalikeBusy(false);
+    }
+  }
+
   const contacts = lead.contacts ?? {};
   const signals = lead.signals ?? {};
+  const quality = lead.quality ?? {
+    recommended_action: "Score first",
+    confidence: 0,
+    risk_flags: [],
+    missing_data: [],
+    contact_channels: [],
+    summary: "Score this lead to decide fit.",
+  };
 
   return (
     <>
@@ -71,6 +124,74 @@ export function LeadDrawer({ lead, onClose }: Props) {
         </header>
 
         <div className="p-5 space-y-5">
+          <section>
+            <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+              Sales action
+            </h4>
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`inline-flex rounded-md border px-2.5 py-1 text-xs font-semibold ${
+                  actionStyles[quality.recommended_action] ?? actionStyles["Score first"]
+                }`}
+              >
+                {quality.recommended_action}
+              </span>
+              <span className="text-xs text-slate-500">
+                {quality.confidence}% data confidence
+              </span>
+            </div>
+            <p className="mt-2 text-sm text-slate-700">{quality.summary}</p>
+            {quality.risk_flags.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {quality.risk_flags.map((flag) => (
+                  <span
+                    key={flag}
+                    className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600"
+                  >
+                    {flag}
+                  </span>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-xl border border-slate-200 p-4 bg-slate-50 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                Pipeline stage
+              </h4>
+              <button
+                onClick={saveStage}
+                disabled={stageBusy}
+                className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+              >
+                {stageBusy ? "Saving…" : "Save stage"}
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <select
+                value={stage}
+                onChange={(e) => setStage(e.target.value as PipelineStage["stage"])}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 outline-none focus:border-indigo-400"
+              >
+                <option value="new">New</option>
+                <option value="contacted">Contacted</option>
+                <option value="qualified">Qualified</option>
+                <option value="dead">Dead</option>
+              </select>
+              <input
+                value={stageReason}
+                onChange={(e) => setStageReason(e.target.value)}
+                placeholder="Reason for change"
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 outline-none focus:border-indigo-400"
+              />
+            </div>
+            <div className="text-xs text-slate-500">
+              Current: <span className="font-medium text-slate-700 capitalize">{lead.stage}</span>
+              {lead.stage_reason ? <span> · {lead.stage_reason}</span> : null}
+            </div>
+          </section>
+
           {lead.score !== null && (
             <section>
               <div className="flex items-baseline justify-between mb-2">
@@ -110,6 +231,40 @@ export function LeadDrawer({ lead, onClose }: Props) {
               </div>
             </section>
           )}
+
+          <section>
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                Lookalikes
+              </h4>
+              <button
+                onClick={findLookalikes}
+                disabled={lookalikeBusy}
+                className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {lookalikeBusy ? "Finding…" : "Find similar"}
+              </button>
+            </div>
+            {lookalikes ? (
+              <div className="space-y-2">
+                {lookalikes.items.map((item) => (
+                  <div key={item.lead.id} className="rounded-lg border border-slate-200 px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-medium text-slate-900">
+                        {item.lead.company_name}
+                      </div>
+                      <div className="text-xs text-slate-500">{item.similarity.toFixed(1)}</div>
+                    </div>
+                    <div className="text-xs text-slate-500 mt-0.5">
+                      {item.reasons[0]?.details?.slice(0, 3).join(", ") || "similar profile"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400">Run similarity search to surface related prospects.</p>
+            )}
+          </section>
 
           {lead.title && (
             <section>

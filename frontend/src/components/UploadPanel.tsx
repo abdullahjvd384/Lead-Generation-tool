@@ -126,8 +126,8 @@ export function UploadPanel({ onUpload, onSeed, onReset, totalLeads }: Props) {
       {mappingNote && (
         <div className="mt-2 text-xs bg-emerald-50 border border-emerald-200 rounded px-2 py-1.5 text-emerald-800">
           <div className="font-medium mb-0.5">
-            {mappingNote.source === "gemini"
-              ? "Auto-mapped via Gemini:"
+            {mappingNote.source === "openai"
+              ? "Auto-mapped via OpenAI:"
               : "Auto-mapped columns:"}
           </div>
           <ul className="space-y-0.5">

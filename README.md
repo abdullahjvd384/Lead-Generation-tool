@@ -30,16 +30,16 @@ npm run dev                       # http://127.0.0.1:5173
 
 Open <http://127.0.0.1:5173>. Vite proxies `/api/*` to the backend.
 
-### 3. (Optional) Enable Gemini AI
+### 3. (Optional) Enable OpenAI AI
 
 Without a key the app uses rule-based scoring + email templates. With a key, three features upgrade: semantic lead scoring, personalized email generation, and intelligent CSV column mapping.
 
-1. Get a free key at <https://aistudio.google.com/apikey>
+1. Get a key at <https://platform.openai.com/api-keys>
 2. Copy `backend/.env.example` to `backend/.env`
-3. Set `GEMINI_API_KEY=your_key_here`
+3. Set `OPENAI_API_KEY=your_key_here`
 4. Restart the backend
 
-The header pill switches from amber **AI: rule-based** to green **AI: Gemini** when the key is active.
+The header pill switches from amber **AI: rule-based** to green **AI: OpenAI** when the key is active.
 
 ## Tests
 
@@ -47,7 +47,7 @@ The header pill switches from amber **AI: rule-based** to green **AI: Gemini** w
 cd backend && .venv/Scripts/python -m pytest -q
 ```
 
-28 unit tests covering the scorer, enricher, dedupe, CSV mapper, and Gemini fallback.
+28 unit tests covering the scorer, enricher, dedupe, CSV mapper, and OpenAI fallback.
 
 ## Dataset
 

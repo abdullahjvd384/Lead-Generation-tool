@@ -47,6 +47,78 @@ class LeadOut(BaseModel):
     contacts: dict[str, Any] = Field(default_factory=dict)
     signals: dict[str, Any] = Field(default_factory=dict)
     reasons: list[dict[str, Any]] = Field(default_factory=list)
+    quality: dict[str, Any] = Field(default_factory=dict)
+    stage: str = "new"
+    stage_reason: str = ""
+    stage_updated_by: Optional[str] = None
+    stage_updated_at: Optional[datetime] = None
+
+
+class RankedLeadOut(LeadOut):
+    rank: int
+    next_step: str
+    rank_reason: str
+
+
+class RankedLeadListOut(BaseModel):
+    limit: int
+    total: int
+    items: list[RankedLeadOut]
+
+
+class PipelineStageIn(BaseModel):
+    stage: str
+    reason: str = ""
+    updated_by: str = "system"
+
+
+class PipelineStageOut(BaseModel):
+    lead_id: int
+    stage: str
+    reason: str = ""
+    updated_by: str = "system"
+    updated_at: datetime
+
+
+class PipelineHistoryOut(BaseModel):
+    id: int
+    lead_id: int
+    from_stage: str
+    to_stage: str
+    reason: str = ""
+    updated_by: str = "system"
+    updated_at: datetime
+
+
+class PipelineSummaryItem(BaseModel):
+    stage: str
+    count: int
+
+
+class PipelineSummaryOut(BaseModel):
+    total: int
+    items: list[PipelineSummaryItem]
+
+
+class LookalikeReasonOut(BaseModel):
+    signal: str
+    weight: float
+    raw: float
+    contribution: float
+    details: list[str] = Field(default_factory=list)
+
+
+class LookalikeMatchOut(BaseModel):
+    lead: LeadOut
+    similarity: float
+    reasons: list[LookalikeReasonOut] = Field(default_factory=list)
+
+
+class LookalikeListOut(BaseModel):
+    seed_lead: LeadOut
+    total: int
+    limit: int
+    items: list[LookalikeMatchOut]
 
 
 class UploadResult(BaseModel):

@@ -1,4 +1,16 @@
-import type { Email, ICP, Lead, ScoreResult, UploadResult } from "./types";
+import type {
+  Email,
+  ICP,
+  Lead,
+  LookalikeList,
+  PipelineStage,
+  PipelineStageHistoryItem,
+  PipelineStageUpdate,
+  PipelineSummary,
+  RankedLeadList,
+  ScoreResult,
+  UploadResult,
+} from "./types";
 
 const BASE = "/api";
 
@@ -15,7 +27,7 @@ export const api = {
   health: () => jsonFetch<{ status: string }>("/health"),
   systemStatus: () =>
     jsonFetch<{
-      gemini_enabled: boolean;
+      ai_enabled: boolean;
       has_key: boolean;
       circuit_open: boolean;
       model: string | null;
@@ -23,6 +35,25 @@ export const api = {
 
   listLeads: () => jsonFetch<Lead[]>("/leads"),
   getLead: (id: number) => jsonFetch<Lead>(`/leads/${id}`),
+  rankedLeads: (opts?: { limit?: number; stage?: string; tier?: string }) => {
+    const params = new URLSearchParams();
+    if (opts?.limit) params.set("limit", String(opts.limit));
+    if (opts?.stage) params.set("stage", opts.stage);
+    if (opts?.tier) params.set("tier", opts.tier);
+    const query = params.toString();
+    return jsonFetch<RankedLeadList>(`/leads/ranked${query ? `?${query}` : ""}`);
+  },
+  pipelineSummary: () => jsonFetch<PipelineSummary>("/leads/pipeline"),
+  updateLeadStage: (leadId: number, payload: PipelineStageUpdate) =>
+    jsonFetch<PipelineStage>(`/leads/${leadId}/stage`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  leadStageHistory: (leadId: number) =>
+    jsonFetch<PipelineStageHistoryItem[]>(`/leads/${leadId}/stage/history`),
+  lookalikes: (leadId: number, limit = 10) =>
+    jsonFetch<LookalikeList>(`/leads/${leadId}/lookalikes?limit=${limit}`),
   resetLeads: () =>
     jsonFetch<UploadResult>("/leads", { method: "DELETE" }),
   seedDemo: () =>

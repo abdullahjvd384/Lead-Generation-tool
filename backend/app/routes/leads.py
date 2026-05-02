@@ -6,22 +6,72 @@ import os
 from typing import Optional
 
 import pandas as pd
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
-from ..db import Enrichment, Lead, Score, get_session
-from ..models import LeadOut, UploadResult
+from ..db import (
+    Enrichment,
+    ICP,
+    Lead,
+    LeadPipeline,
+    LeadPipelineHistory,
+    Score,
+    get_session,
+)
+from ..models import (
+    LeadOut,
+    LookalikeListOut,
+    LookalikeMatchOut,
+    LookalikeReasonOut,
+    PipelineHistoryOut,
+    PipelineStageIn,
+    PipelineStageOut,
+    PipelineSummaryItem,
+    PipelineSummaryOut,
+    RankedLeadListOut,
+    RankedLeadOut,
+    UploadResult,
+)
 from ..services import csv_mapper
 from ..services.dedupe import normalize_domain
+from ..services.quality import assess_lead_quality
+from ..services.workflows import lookalike_matches, rank_leads
 
 router = APIRouter(prefix="/leads", tags=["leads"])
 
 
 def _hydrate(s, leads: list[Lead]) -> list[LeadOut]:
     out: list[LeadOut] = []
+    icp_row = s.get(ICP, 1)
+    icp = {
+        "size_min": icp_row.size_min if icp_row else 0,
+        "size_max": icp_row.size_max if icp_row else 10000,
+    }
     for lead in leads:
         e = s.get(Enrichment, lead.id)
         sc = s.get(Score, lead.id)
+        pipeline = s.get(LeadPipeline, lead.id)
+        lead_dict = {
+            "company_name": lead.company_name or "",
+            "website": lead.website or "",
+            "domain": lead.domain or "",
+            "industry": lead.industry or "",
+            "employee_count": lead.employee_count or 0,
+            "location": lead.location or "",
+        }
+        enrich_dict = {
+            "contacts": (e.contacts if e else {}) or {},
+            "status": (e.status if e else None),
+        }
+        score_dict = (
+            {
+                "score": sc.score,
+                "tier": sc.tier,
+                "reasons": (sc.reasons or []),
+            }
+            if sc
+            else None
+        )
         out.append(
             LeadOut(
                 id=lead.id,
@@ -41,9 +91,144 @@ def _hydrate(s, leads: list[Lead]) -> list[LeadOut]:
                 tier=(sc.tier if sc else None),
                 why=(sc.why if sc else None),
                 reasons=(sc.reasons if sc else []) or [],
+                quality=assess_lead_quality(lead_dict, enrich_dict, score_dict, icp),
+                stage=(pipeline.stage if pipeline else "new"),
+                stage_reason=(pipeline.reason if pipeline else ""),
+                stage_updated_by=(pipeline.updated_by if pipeline else None),
+                stage_updated_at=(pipeline.updated_at if pipeline else None),
             )
         )
     return out
+
+
+def _stage_row(s, lead_id: int) -> LeadPipeline:
+    row = s.get(LeadPipeline, lead_id)
+    if row is None:
+        row = LeadPipeline(lead_id=lead_id, stage="new", reason="", updated_by="system")
+        s.add(row)
+        s.flush()
+    return row
+
+
+@router.get("/ranked", response_model=RankedLeadListOut)
+def ranked_leads(
+    limit: int = Query(10, ge=1, le=100),
+    stage: Optional[str] = Query(default=None),
+    tier: Optional[str] = Query(default=None),
+) -> RankedLeadListOut:
+    with get_session() as s:
+        leads = _hydrate(s, s.query(Lead).order_by(Lead.id.asc()).all())
+
+    rows = leads
+    if stage:
+        stage_filter = stage.strip().lower()
+        rows = [row for row in rows if row.stage == stage_filter]
+    if tier:
+        tier_filter = tier.strip().upper()
+        rows = [row for row in rows if (row.tier or "") == tier_filter]
+
+    ranked = rank_leads([row.model_dump() for row in rows])
+    items = [RankedLeadOut(**item) for item in ranked[:limit]]
+    return RankedLeadListOut(limit=limit, total=len(ranked), items=items)
+
+
+@router.get("/pipeline", response_model=PipelineSummaryOut)
+def pipeline_summary() -> PipelineSummaryOut:
+    with get_session() as s:
+        leads = s.query(Lead).all()
+        counts = {"new": 0, "contacted": 0, "qualified": 0, "dead": 0}
+        for lead in leads:
+            row = s.get(LeadPipeline, lead.id)
+            stage = (row.stage if row else "new").strip().lower()
+            if stage not in counts:
+                stage = "new"
+            counts[stage] += 1
+    return PipelineSummaryOut(
+        total=sum(counts.values()),
+        items=[PipelineSummaryItem(stage=stage, count=count) for stage, count in counts.items()],
+    )
+
+
+@router.put("/{lead_id}/stage", response_model=PipelineStageOut)
+def update_lead_stage(lead_id: int, payload: PipelineStageIn) -> PipelineStageOut:
+    stage = payload.stage.strip().lower()
+    if stage not in {"new", "contacted", "qualified", "dead"}:
+        raise HTTPException(status_code=400, detail="invalid stage")
+
+    with get_session() as s:
+        lead = s.get(Lead, lead_id)
+        if lead is None:
+            raise HTTPException(status_code=404, detail="lead not found")
+
+        row = _stage_row(s, lead_id)
+        previous_stage = row.stage or "new"
+        row.stage = stage
+        row.reason = payload.reason or ""
+        row.updated_by = payload.updated_by or "system"
+
+        s.add(
+            LeadPipelineHistory(
+                lead_id=lead_id,
+                from_stage=previous_stage,
+                to_stage=stage,
+                reason=payload.reason or "",
+                updated_by=payload.updated_by or "system",
+            )
+        )
+        s.commit()
+        s.refresh(row)
+
+    return PipelineStageOut(
+        lead_id=lead_id,
+        stage=row.stage,
+        reason=row.reason or "",
+        updated_by=row.updated_by or "system",
+        updated_at=row.updated_at,
+    )
+
+
+@router.get("/{lead_id}/stage/history", response_model=list[PipelineHistoryOut])
+def lead_stage_history(lead_id: int) -> list[PipelineHistoryOut]:
+    with get_session() as s:
+        rows = (
+            s.query(LeadPipelineHistory)
+            .filter(LeadPipelineHistory.lead_id == lead_id)
+            .order_by(LeadPipelineHistory.updated_at.desc(), LeadPipelineHistory.id.desc())
+            .all()
+        )
+    return [
+        PipelineHistoryOut(
+            id=row.id,
+            lead_id=row.lead_id,
+            from_stage=row.from_stage,
+            to_stage=row.to_stage,
+            reason=row.reason or "",
+            updated_by=row.updated_by or "system",
+            updated_at=row.updated_at,
+        )
+        for row in rows
+    ]
+
+
+@router.get("/{lead_id}/lookalikes", response_model=LookalikeListOut)
+def lead_lookalikes(lead_id: int, limit: int = Query(10, ge=1, le=50)) -> LookalikeListOut:
+    with get_session() as s:
+        lead = s.get(Lead, lead_id)
+        if lead is None:
+            raise HTTPException(status_code=404, detail="lead not found")
+        seed = _hydrate(s, [lead])[0]
+        candidates = _hydrate(s, s.query(Lead).filter(Lead.id != lead_id).all())
+
+    matches = lookalike_matches(seed.model_dump(), [candidate.model_dump() for candidate in candidates], limit=limit)
+    items = [
+        LookalikeMatchOut(
+            lead=LeadOut(**match["lead"]),
+            similarity=match["similarity"],
+            reasons=[LookalikeReasonOut(**reason) for reason in match["reasons"]],
+        )
+        for match in matches
+    ]
+    return LookalikeListOut(seed_lead=seed, total=len(matches), limit=limit, items=items)
 
 
 @router.get("", response_model=list[LeadOut])
@@ -161,6 +346,8 @@ def reset_leads() -> UploadResult:
     with get_session() as s:
         s.query(Score).delete()
         s.query(Enrichment).delete()
+        s.query(LeadPipelineHistory).delete()
+        s.query(LeadPipeline).delete()
         s.query(Lead).delete()
         s.commit()
     return UploadResult(inserted=0, duplicates=0, invalid=0, total_leads=0)
@@ -179,12 +366,14 @@ def export_csv(tier: Optional[str] = None) -> StreamingResponse:
     writer = csv.writer(buf)
     writer.writerow(
         ["company", "website", "industry", "employee_count", "location",
-         "score", "tier", "why", "primary_email", "linkedin"]
+         "score", "tier", "recommended_action", "confidence", "risk_flags",
+         "why", "primary_email", "linkedin"]
     )
     for r in rows:
         contacts = r.contacts or {}
         emails = contacts.get("emails") or []
         social = contacts.get("social") or {}
+        quality = r.quality or {}
         writer.writerow(
             [
                 r.company_name,
@@ -194,6 +383,9 @@ def export_csv(tier: Optional[str] = None) -> StreamingResponse:
                 r.location,
                 r.score if r.score is not None else "",
                 r.tier or "",
+                quality.get("recommended_action", ""),
+                quality.get("confidence", ""),
+                "; ".join(quality.get("risk_flags") or []),
                 r.why or "",
                 emails[0] if emails else "",
                 social.get("linkedin", ""),

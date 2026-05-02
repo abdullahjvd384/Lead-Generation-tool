@@ -4,8 +4,8 @@ backend expects.
 Two passes:
 1. Alias dictionary (free, instant) — handles ~90% of real CSVs from
    Salesforce, HubSpot, Apollo, ZoomInfo, etc.
-2. Gemini fallback — if `company_name` is still missing after pass 1 and
-   GEMINI_API_KEY is set, ask Gemini to map the unrecognized headers.
+2. OpenAI fallback — if `company_name` is still missing after pass 1 and
+   OPENAI_API_KEY is set, ask OpenAI to map the unrecognized headers.
 
 Returns the renamed DataFrame plus a `mapping_used` dict so the UI can show
 the user which columns got remapped and how.
@@ -85,10 +85,10 @@ def apply_alias_mapping(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, str]]
     return df, mapping_used
 
 
-def _gemini_map(headers: list[str], sample_rows: list[dict]) -> dict[str, str]:
-    """Pass 2 — ask Gemini to map unrecognized headers to canonical names.
+def _openai_map(headers: list[str], sample_rows: list[dict]) -> dict[str, str]:
+    """Pass 2 — ask OpenAI to map unrecognized headers to canonical names.
 
-    Returns {original_header: canonical_name} for headers Gemini could match.
+    Returns {original_header: canonical_name} for headers OpenAI could match.
     Empty dict on any failure.
     """
     prompt = f"""You are mapping CSV columns to a canonical schema for a sales lead tool.
@@ -138,12 +138,12 @@ above (or "skip"). Each canonical field should appear at most once.
 
 
 def normalize_columns(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, str], str]:
-    """Run alias pass, then Gemini fallback if company_name is still missing.
+    """Run alias pass, then OpenAI fallback if company_name is still missing.
 
     Returns (df, mapping_used, source) where source is one of:
         "exact"  — no remapping was needed
         "alias"  — alias dictionary did the work
-        "gemini" — Gemini fallback was used
+        "openai" — OpenAI fallback was used
         "none"   — nothing matched (caller should return a 400)
     """
     df, alias_mapping = apply_alias_mapping(df)
@@ -158,15 +158,15 @@ def normalize_columns(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, str], s
 
     sample_rows: list[dict[str, Any]] = df.head(3).to_dict(orient="records")
     headers = [str(c) for c in df.columns]
-    gemini_mapping = _gemini_map(headers, sample_rows)
+    openai_mapping = _openai_map(headers, sample_rows)
 
-    if not gemini_mapping:
+    if not openai_mapping:
         return df, alias_mapping, "none"
 
-    df = df.rename(columns=gemini_mapping)
-    combined = {**alias_mapping, **gemini_mapping}
+    df = df.rename(columns=openai_mapping)
+    combined = {**alias_mapping, **openai_mapping}
 
     if "company_name" not in df.columns:
         return df, combined, "none"
 
-    return df, combined, "gemini"
+    return df, combined, "openai"

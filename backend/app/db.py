@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import os
 from datetime import datetime
-from typing import Any
 
 from sqlalchemy import (
     Column,
     DateTime,
     Float,
+    ForeignKey,
     Integer,
     JSON,
     String,
@@ -77,6 +77,26 @@ class ScrapeCache(Base):
     html = Column(Text, default="")
     headers = Column(JSON, default=dict)
     fetched_at = Column(DateTime, default=datetime.utcnow)
+
+
+class LeadPipeline(Base):
+    __tablename__ = "lead_pipeline"
+    lead_id = Column(Integer, ForeignKey("leads.id"), primary_key=True)
+    stage = Column(String, default="new", index=True)
+    reason = Column(Text, default="")
+    updated_by = Column(String, default="system")
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class LeadPipelineHistory(Base):
+    __tablename__ = "lead_pipeline_history"
+    id = Column(Integer, primary_key=True)
+    lead_id = Column(Integer, ForeignKey("leads.id"), index=True)
+    from_stage = Column(String, default="")
+    to_stage = Column(String, default="new")
+    reason = Column(Text, default="")
+    updated_by = Column(String, default="system")
+    updated_at = Column(DateTime, default=datetime.utcnow)
 
 
 def init_db() -> None:

@@ -1,4 +1,4 @@
-"""Gemini-powered scorer.
+"""OpenAI-powered scorer.
 
 Returns the same shape as `scorer.score_lead` so the route, the SQL schema,
 and the frontend drawer all keep working unchanged. On any failure (no key,
