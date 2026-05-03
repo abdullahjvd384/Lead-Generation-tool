@@ -105,8 +105,14 @@ def _industry_similarity(target: dict[str, Any], candidate: dict[str, Any]) -> t
 
 
 def _size_similarity(target: dict[str, Any], candidate: dict[str, Any]) -> tuple[float, list[str]]:
-    target_size = int(target.get("employee_count") or 0)
-    candidate_size = int(candidate.get("employee_count") or 0)
+    try:
+        target_size = int(target.get("employee_count") or 0)
+    except (ValueError, TypeError):
+        target_size = 0
+    try:
+        candidate_size = int(candidate.get("employee_count") or 0)
+    except (ValueError, TypeError):
+        candidate_size = 0
     if target_size <= 0 or candidate_size <= 0:
         return 0.25, ["size missing"]
     ratio = min(target_size, candidate_size) / max(target_size, candidate_size)

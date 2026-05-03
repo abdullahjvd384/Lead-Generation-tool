@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timedelta
 from typing import Optional
 from urllib.parse import urlparse
@@ -9,6 +10,8 @@ import httpx
 from sqlalchemy.orm import Session
 
 from ..db import ScrapeCache
+
+logger = logging.getLogger(__name__)
 
 USER_AGENT = "LeadQualifier/0.1 (+contact: leadqualifier@example.com)"
 TIMEOUT_S = 5.0
@@ -46,6 +49,72 @@ def _lock_for(domain: str) -> asyncio.Lock:
     return lock
 
 
+def read_cache(session: Session, domain: str) -> Optional[tuple[str, dict]]:
+    """Read a cached scrape result. Returns (html, headers) or None if miss."""
+    row = session.get(ScrapeCache, domain)
+    if row and row.fetched_at and (datetime.utcnow() - row.fetched_at) < CACHE_TTL:
+        return row.html or "", row.headers or {}
+    return None
+
+
+def save_to_cache(session: Session, domain: str, html: str, headers: dict) -> None:
+    """Save a scrape result to the cache. Caller must commit the session."""
+    existing = session.get(ScrapeCache, domain)
+    if existing:
+        existing.html = html
+        existing.headers = headers
+        existing.fetched_at = datetime.utcnow()
+    else:
+        session.add(
+            ScrapeCache(
+                domain=domain,
+                html=html,
+                headers=headers,
+                fetched_at=datetime.utcnow(),
+            )
+        )
+
+
+async def fetch_homepage_nocache(
+    domain: str, *, client: Optional[httpx.AsyncClient] = None
+) -> tuple[str, dict, str]:
+    """HTTP-only scraping — no database interaction.
+
+    Returns (html, headers, status).
+    Safe for use in concurrent asyncio.gather() calls.
+    """
+    if not domain:
+        return "", {}, "error"
+
+    own_client = client is None
+    if own_client:
+        client = httpx.AsyncClient(
+            timeout=TIMEOUT_S,
+            headers={"User-Agent": USER_AGENT},
+            follow_redirects=True,
+        )
+
+    async with _semaphore, _lock_for(domain):
+        await asyncio.sleep(PER_DOMAIN_GAP_S)
+        try:
+            html, headers, status = "", {}, "error"
+            for url in _candidate_urls(domain):
+                try:
+                    resp = await client.get(url)
+                    if resp.status_code < 400 and (resp.text or "").strip():
+                        html = resp.text or ""
+                        headers = dict(resp.headers)
+                        status = "ok"
+                        break
+                except Exception:
+                    continue
+        finally:
+            if own_client:
+                await client.aclose()
+
+    return html, headers, status
+
+
 def _cached(session: Session, domain: str) -> Optional[ScrapeCache]:
     row = session.get(ScrapeCache, domain)
     if row and row.fetched_at and (datetime.utcnow() - row.fetched_at) < CACHE_TTL:
@@ -68,48 +137,10 @@ async def fetch_homepage(
     if cached:
         return cached.html or "", cached.headers or {}, "ok"
 
-    own_client = client is None
-    if own_client:
-        client = httpx.AsyncClient(
-            timeout=TIMEOUT_S,
-            headers={"User-Agent": USER_AGENT},
-            follow_redirects=True,
-        )
-
-    async with _semaphore, _lock_for(domain):
-        # Per-domain politeness gap.
-        await asyncio.sleep(PER_DOMAIN_GAP_S)
-        try:
-            html, headers, status = "", {}, "error"
-            for url in _candidate_urls(domain):
-                try:
-                    resp = await client.get(url)
-                    if resp.status_code < 400 and (resp.text or "").strip():
-                        html = resp.text or ""
-                        headers = dict(resp.headers)
-                        status = "ok"
-                        break
-                except Exception:
-                    continue
-        finally:
-            if own_client:
-                await client.aclose()
+    html, headers, status = await fetch_homepage_nocache(domain, client=client)
 
     if status == "ok":
-        existing = session.get(ScrapeCache, domain)
-        if existing:
-            existing.html = html
-            existing.headers = headers
-            existing.fetched_at = datetime.utcnow()
-        else:
-            session.add(
-                ScrapeCache(
-                    domain=domain,
-                    html=html,
-                    headers=headers,
-                    fetched_at=datetime.utcnow(),
-                )
-            )
+        save_to_cache(session, domain, html, headers)
         session.commit()
 
     return html, headers, status

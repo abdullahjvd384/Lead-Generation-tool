@@ -3,6 +3,14 @@ from __future__ import annotations
 from typing import Any
 
 
+def _safe_int(value, default: int = 0) -> int:
+    """Safely convert a value to int, returning default on failure."""
+    try:
+        return int(value or default)
+    except (ValueError, TypeError):
+        return default
+
+
 ACTION_PRIORITIZE = "Prioritize"
 ACTION_RESEARCH = "Research"
 ACTION_NURTURE = "Nurture"
@@ -51,7 +59,7 @@ def assess_lead_quality(
         missing_data.append("website")
     if not lead.get("industry"):
         missing_data.append("industry")
-    if not int(lead.get("employee_count") or 0):
+    if not _safe_int(lead.get("employee_count")):
         missing_data.append("employee count")
     if not channels:
         missing_data.append("contact channel")
@@ -63,7 +71,7 @@ def assess_lead_quality(
         confidence += 15
     if lead.get("industry"):
         confidence += 15
-    if int(lead.get("employee_count") or 0) > 0:
+    if _safe_int(lead.get("employee_count")) > 0:
         confidence += 15
     if score.get("score") is not None:
         confidence += 20
@@ -88,10 +96,10 @@ def assess_lead_quality(
         risk_flags.append("weak ICP keyword match")
 
     size_reason = _reason_by_signal(reasons, "size_band")
-    employees = int(lead.get("employee_count") or 0)
+    employees = _safe_int(lead.get("employee_count"))
     if employees and size_reason and float(size_reason.get("raw") or 0) < 0.5:
-        low = int(icp.get("size_min") or 0)
-        high = int(icp.get("size_max") or 10000)
+        low = _safe_int(icp.get("size_min"))
+        high = _safe_int(icp.get("size_max"), 10000)
         risk_flags.append(f"outside size band ({low}-{high})")
 
     if confidence < 55:
