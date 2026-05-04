@@ -1,9 +1,26 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
 from bs4 import BeautifulSoup
+
+logger = logging.getLogger(__name__)
+
+# Python 3.13's stdlib html.parser raises ValueError on malformed numeric
+# character references like "&#8209bird" (missing semicolon, followed by
+# letters). Insert the missing semicolon so the parser can recover.
+_BAD_NUMERIC_CHARREF = re.compile(r"&#(\d+)(?=[A-Za-z])")
+_BAD_HEX_CHARREF = re.compile(r"&#[xX]([0-9A-Fa-f]+)(?=[G-Zg-z])")
+
+
+def _sanitize_html(html: str) -> str:
+    if not html:
+        return html
+    html = _BAD_NUMERIC_CHARREF.sub(r"&#\1;", html)
+    html = _BAD_HEX_CHARREF.sub(r"&#x\1;", html)
+    return html
 
 # (Display name, regex tested against page HTML and headers, lowercased)
 TECH_SIGNATURES: list[tuple[str, re.Pattern]] = [
@@ -101,18 +118,40 @@ def extract_signals(html: str, soup: BeautifulSoup) -> dict[str, Any]:
     }
 
 
+def _empty_enrichment() -> dict[str, Any]:
+    return {
+        "title": "",
+        "description": "",
+        "tech_stack": [],
+        "contacts": {"emails": [], "phones": [], "social": {}},
+        "signals": {"hiring": False, "founded_year": None, "page_words": 0},
+    }
+
+
 def enrich(html: str, headers: dict) -> dict[str, Any]:
     """Pure function: turn raw HTML+headers into the enrichment dict."""
     if not html:
-        return {
-            "title": "",
-            "description": "",
-            "tech_stack": [],
-            "contacts": {"emails": [], "phones": [], "social": {}},
-            "signals": {"hiring": False, "founded_year": None, "page_words": 0},
-        }
+        return _empty_enrichment()
 
-    soup = BeautifulSoup(html, "html.parser")
+    try:
+        soup = BeautifulSoup(_sanitize_html(html), "html.parser")
+    except Exception as exc:
+        # Malformed HTML can still trip the parser even after sanitization.
+        # Degrade gracefully: regex-only extraction on the raw HTML so a single
+        # bad page never crashes the whole scoring batch.
+        logger.warning("BeautifulSoup parse failed (%s); using regex fallback", exc)
+        result = _empty_enrichment()
+        result["tech_stack"] = detect_tech_stack(html, headers)
+        result["contacts"]["emails"] = sorted(
+            {
+                e
+                for e in EMAIL_RE.findall(html)
+                if not e.lower().endswith((".png", ".jpg", ".gif"))
+                and not any(noise in e.lower() for noise in ("sentry.io", "wixpress", "example.com"))
+            }
+        )[:5]
+        return result
+
     title = (soup.title.string.strip() if soup.title and soup.title.string else "")[:200]
 
     description = ""

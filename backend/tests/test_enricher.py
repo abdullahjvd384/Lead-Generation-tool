@@ -48,3 +48,22 @@ def test_enrich_empty_html():
     assert r["title"] == ""
     assert r["tech_stack"] == []
     assert r["signals"]["hiring"] is False
+
+
+def test_enrich_handles_malformed_numeric_char_ref():
+    # Regression: Python 3.13's html.parser raises ValueError on a numeric
+    # char ref missing its semicolon followed by letters (e.g. "&#8209bird").
+    # enrich() must not crash — it must return a valid dict so the scoring
+    # batch can continue.
+    bad_html = (
+        "<html><head><title>Bird Co</title></head><body>"
+        "<h3>Early&#8209bird pricing ends soon</h3>"
+        "<a href='mailto:hi@bird.com'>contact</a>"
+        "</body></html>"
+    )
+    r = enrich(bad_html, {})
+    assert isinstance(r, dict)
+    assert "contacts" in r and "emails" in r["contacts"]
+    # Either the sanitizer rescued the parse (full extraction works) or the
+    # regex fallback kicked in. Both paths must surface the email.
+    assert "hi@bird.com" in r["contacts"]["emails"]
